@@ -1,0 +1,31 @@
+{
+   "name": "CNC",
+   "version": "0.0.1",
+   "description": "Awesome project developed with TypeORM.",
+   "type": "commonjs",
+   "devDependencies": {
+      "@types/node": "^22.13.10",
+      "ts-node": "^10.9.2",
+      "ts-node-dev": "^2.0.0",
+      "typescript": "^5.8.2"
+   },
+   "dependencies": {
+      "@types/fs-extra": "^11.0.4",
+      "axios": "^1.11.0",
+      "dotenv": "^17.2.1",
+      "fs-extra": "^11.3.0",
+      "mysql2": "^3.14.0",
+      "reflect-metadata": "^0.2.2",
+      "typeorm": "0.3.25",
+      "xlsx": "^0.18.5"
+   },
+   "scripts": {
+      "start": "ts-node ./src/index.ts",
+      "dev": "ts-node-dev ./src/index.ts",
+      "typeorm": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts",
+      "build": "tsc",
+      "migration:generate": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts migration:generate ./src/server/database/migrations/default",
+      "migration:run": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts migration:run",
+      "migration:revert": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts migration:revert"
+   }
+}
