@@ -1,5 +1,5 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
-import { Regiao } from "../../shared/interfaces";
+import { Metodo, Regiao } from "../../shared/interfaces";
 
 
 @Entity('icfs')
@@ -33,6 +33,9 @@ export class Icf {
 
     @Column({ nullable: false, type: 'enum', enum: Regiao })
     REGIAO: Regiao;
+
+    @Column({ nullable: false, type: 'enum', enum: Metodo })
+    METODO: Metodo;
 
     @CreateDateColumn()
     data_criacao?: Date

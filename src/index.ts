@@ -10,6 +10,8 @@ async function processAllData() {
     const startTime = Date.now();
 
     try {
+
+        
         // ICEC - de 03/2012 até hoje
         console.log('📊 Iniciando ICEC (Março/2012 → presente)...');
         const icecService = new IcecService();
@@ -21,9 +23,9 @@ async function processAllData() {
         const icfService = new IcfService();
         await icfService.processAllIcfData(['BR', 'ES']);
         console.log('✅ ICF concluído\n');
-
-        // PEIC - de 03/2012 até hoje
-        console.log('📋 Iniciando PEIC (Março/2012 → presente)...');
+        
+        // PEIC - de 03/2012 até o mês passado
+        console.log('📋 Iniciando PEIC (Março/2012 → mês passado)...');
         const peicService = new PeicService();
         await peicService.processAllPeicData(['BR', 'ES']);
         console.log('✅ PEIC concluído\n');
