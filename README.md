@@ -1,269 +1,466 @@
-# 📊 CNC - Sistema de Coleta de Índices Econômicos
+# 📊 CNC - Sistema de Coleta de Indicadores Econômicos
 
-Sistema automatizado para coleta, processamento e armazenamento de dados dos índices econômicos ICEC (Índice de Confiança do Empresário do Comércio), ICF (Índice de Confiança do Consumidor) e PEIC (Pesquisa de Expectativa de Investimento do Comércio) da FeComércio/ES.
+Sistema automatizado para extração, processamento e armazenamento dos principais indicadores econômicos da Confederação Nacional do Comércio (CNC). O projeto coleta dados dos indicadores ICEC, ICF e PEIC de forma automatizada através de múltiplas fontes.
 
-## 🚀 Tecnologias Utilizadas
+---
 
-- **Node.js** com **TypeScript**
-- **TypeORM** para ORM e migrations
-- **MySQL** como banco de dados
-- **Axios** para requisições HTTP
-- **XLSX** para manipulação de planilhas Excel
-- **dotenv** para gerenciamento de variáveis de ambiente
+## 🚀 Visão Geral
 
-## 📋 Funcionalidades
+O **CNC** é um sistema robusto desenvolvido em TypeScript que automatiza a coleta de dados econômicos essenciais:
 
-### Índices Coletados:
+- **ICEC** (Índice de Confiança do Empresário do Comércio)
+- **ICF** (Índice de Confiança do Consumidor)  
+- **PEIC** (Pesquisa de Endividamento e Inadimplência do Consumidor)
 
-1. **ICEC** - Índice de Confiança do Empresário do Comércio
-   - Coleta dados desde março/2012 até presente
-   - Categorias: Até 50 funcionários, Mais de 50, Semiduráveis, Não duráveis, Duráveis
+### Características Principais
 
-2. **ICF** - Índice de Confiança do Consumidor  
-   - Coleta dados desde abril/2012 até presente
-   - Análise de confiança do consumidor por região
+✅ **Coleta Híbrida**: Combina download direto de planilhas e web scraping  
+✅ **Arquitetura Modular**: Separação clara de responsabilidades por serviços  
+✅ **Processamento Automático**: Agendamento inteligente via cron jobs  
+✅ **Fallback Robusto**: Sistema de retry com web scraping em caso de falha  
+✅ **Dados Históricos**: Coleta desde 2010 até o período atual  
+✅ **Multi-região**: Suporte para Brasil (BR) e Espírito Santo (ES)  
 
-3. **PEIC** - Pesquisa de Expectativa de Investimento do Comércio
-   - Coleta dados desde março/2012 até presente
-   - Expectativas de investimento empresarial
+---
 
-### Regiões Suportadas:
-- **BR** - Brasil (nacional)
-- **ES** - Espírito Santo (estadual)
+## 🛠️ Tecnologias Utilizadas
+
+### Core
+- **Node.js** - Runtime JavaScript
+- **TypeScript** - Linguagem com tipagem estática
+- **TypeORM** - ORM para banco de dados
+- **MySQL** - Sistema de gerenciamento de banco de dados
+
+### Automação e Processamento
+- **Playwright** - Automação de navegador para web scraping
+- **XLSX** - Processamento de planilhas Excel
+- **Axios** - Cliente HTTP para downloads
+- **Node-Cron** - Agendamento de tarefas
+
+### Utilitários
+- **fs-extra** - Manipulação de arquivos
+- **dotenv** - Gerenciamento de variáveis de ambiente
+- **reflect-metadata** - Suporte a decorators do TypeORM
+
+---
 
 ## 📁 Estrutura do Projeto
 
 ```
 CNC/
 ├── src/
-│   ├── index.ts                    # Ponto de entrada da aplicação
+│   ├── index.ts                 # Ponto de entrada da aplicação
+│   ├── force.ts                 # Execução forçada dos processos
 │   └── server/
-│       ├── database/
-│       │   ├── data-source.ts      # Configuração do banco de dados
-│       │   ├── entities/           # Entidades do banco (ICEC, ICF, PEIC)
-│       │   ├── migrations/         # Migrações do banco
-│       │   └── repositories/       # Repositórios para acesso aos dados
-│       ├── services/               # Serviços de processamento (icec, icf, peic)
-│       ├── shared/                 # Interfaces compartilhadas
-│       └── tests/                  # Arquivos de teste e debug
-├── temp/                           # Arquivos temporários (Excel baixados)
-├── package.json
-├── tsconfig.json
-└── README.md
+│       ├── database/            # Configuração do banco de dados
+│       │   ├── data-source.ts   # Configuração TypeORM
+│       │   ├── entities/        # Entidades do banco
+│       │   │   ├── Icec.ts      # Entidade ICEC
+│       │   │   ├── Icf.ts       # Entidade ICF
+│       │   │   └── Peic.ts      # Entidade PEIC
+│       │   ├── migrations/      # Migrações do banco
+│       │   └── repositories/    # Repositórios de dados
+│       ├── scheduler/           # Orquestração de tarefas
+│       │   └── orchestrator.ts  # Gerenciador de cron jobs
+│       ├── services/            # Lógica de negócio
+│       │   ├── icec.ts          # Serviço ICEC
+│       │   ├── icf.ts           # Serviço ICF
+│       │   └── peic.ts          # Serviço PEIC
+│       ├── shared/              # Interfaces e tipos compartilhados
+│       │   └── interfaces.ts    # Definições de tipos
+│       └── tests/               # Testes e scripts de debug
+├── temp/                        # Arquivos temporários
+├── build/                       # Código compilado
+└── package.json                 # Dependências e scripts
 ```
+
+---
 
 ## ⚙️ Configuração e Instalação
 
-### 1. Pré-requisitos
-
-- Node.js (versão 16 ou superior)
-- MySQL 8.0+
+### Pré-requisitos
+- Node.js (versão 18 ou superior)
+- MySQL (versão 8 ou superior)
 - NPM ou Yarn
 
-### 2. Instalação
-
+### 1. Clone o repositório
 ```bash
-# Clonar o repositório
 git clone <url-do-repositorio>
 cd CNC
+```
 
-# Instalar dependências
+### 2. Instale as dependências
+```bash
 npm install
 ```
 
-### 3. Configuração do Banco de Dados
-
-Crie um arquivo `.env` na raiz do projeto com as seguintes variáveis:
+### 3. Configure as variáveis de ambiente
+Crie um arquivo `.env` na raiz do projeto:
 
 ```env
 # Configurações do Banco de Dados
 DB_HOST=localhost
 DB_PORT=3306
-DB_USER=seu_usuario
+DB_USERNAME=seu_usuario
 DB_PASSWORD=sua_senha
-DB_NAME=cnc_database
+DB_DATABASE=cnc_database
 
-# URL Base da API
+# URL Base para Downloads
 BASE_URL=https://backend.pesquisascnc.com.br/admin/4/upload
+
+# Configurações Opcionais
+NODE_ENV=development
 ```
 
-### 4. Configuração do Banco
-
+### 4. Execute as migrações do banco
 ```bash
-# Executar migrações
 npm run migration:run
 ```
 
-## 🚀 Como Executar
-
-### Processamento Completo (Produção)
+### 5. Inicie a aplicação
 ```bash
-npm start
-```
-
-### Modo Desenvolvimento (com hot reload)
-```bash
+# Modo desenvolvimento
 npm run dev
+
+# Modo produção
+npm start
+
+# Execução forçada (sem aguardar cron)
+npm run force
 ```
-
-### Comandos de Migração
-```bash
-# Gerar nova migração
-npm run migration:generate
-
-# Executar migrações pendentes
-npm run migration:run
-
-# Reverter última migração
-npm run migration:revert
-```
-
-## 📊 Funcionamento do Sistema
-
-### Fluxo de Processamento:
-
-1. **Inicialização**: Conecta ao banco de dados MySQL
-2. **Processamento Sequencial**:
-   - ICEC (Março/2012 → presente)
-   - ICF (Abril/2012 → presente)  
-   - PEIC (Março/2012 → presente)
-3. **Para cada índice**:
-   - Gera períodos mensais desde data inicial
-   - Para cada região (BR, ES):
-     - Baixa arquivo Excel da API
-     - Extrai e processa dados
-     - Salva no banco de dados
-     - Remove arquivo temporário
-4. **Finalização**: Exibe estatísticas e encerra
-
-### Exemplo de Saída:
-```
-🔗 Banco de dados conectado com sucesso
-
-🚀 === INICIANDO PROCESSAMENTO EM MASSA DE TODOS OS ÍNDICES ===
-
-📊 Iniciando ICEC (Março/2012 → presente)...
-📊 Processando ICEC BR 03/2012
-✅ ICEC concluído
-
-📈 Iniciando ICF (Abril/2012 → presente)...
-📈 Processando ICF BR 04/2012
-✅ ICF concluído
-
-📋 Iniciando PEIC (Março/2012 → presente)...
-📋 Processando PEIC BR 03/2012
-✅ PEIC concluído
-
-🎉 === PROCESSAMENTO COMPLETO FINALIZADO ===
-⏱️  Tempo total: 15 minutos
-📊 Todos os índices foram processados e salvos no banco de dados
-💾 Dados históricos desde 2012 até presente disponíveis
-```
-
-## 📊 Estrutura dos Dados
-
-### Tabela ICEC
-```sql
-- id (UUID, PK)
-- ICEC (FLOAT) - Índice principal
-- ATÉ_50 (FLOAT) - Empresas até 50 funcionários
-- MAIS_DE_50 (FLOAT) - Empresas com mais de 50 funcionários
-- SEMIDURAVEIS (FLOAT)
-- NAO_DURAVEIS (FLOAT)
-- DURAVEIS (FLOAT)
-- MES (INT)
-- ANO (INT)
-- REGIAO (ENUM: 'BR', 'ES')
-- created_at (TIMESTAMP)
-- updated_at (TIMESTAMP)
-```
-
-### Tabela ICF
-```sql
-- id (UUID, PK)
-- ICF (FLOAT) - Índice de Confiança do Consumidor
-- MES (INT)
-- ANO (INT)
-- REGIAO (ENUM: 'BR', 'ES')
-- created_at (TIMESTAMP)
-- updated_at (TIMESTAMP)
-```
-
-### Tabela PEIC
-```sql
-- id (UUID, PK)
-- PEIC (FLOAT) - Índice de Expectativa de Investimento
-- MES (INT)
-- ANO (INT)
-- REGIAO (ENUM: 'BR', 'ES')
-- created_at (TIMESTAMP)
-- updated_at (TIMESTAMP)
-```
-
-## 🛠️ Scripts Disponíveis
-
-| Script | Descrição |
-|--------|-----------|
-| `npm start` | Executa o processamento completo dos dados |
-| `npm run dev` | Executa em modo desenvolvimento com hot reload |
-| `npm run build` | Compila o TypeScript para JavaScript |
-| `npm run typeorm` | Executa comandos do TypeORM |
-| `npm run migration:generate` | Gera nova migração baseada nas mudanças das entidades |
-| `npm run migration:run` | Executa todas as migrações pendentes |
-| `npm run migration:revert` | Reverte a última migração executada |
-
-## 🔧 Desenvolvimento
-
-### Adicionando Novos Índices
-
-1. Criar nova entidade em `src/server/database/entities/`
-2. Criar repositório em `src/server/database/repositories/`
-3. Implementar serviço em `src/server/services/`
-4. Adicionar processamento no `src/index.ts`
-5. Gerar e executar migração
-
-### Testando Componentes
-
-O projeto inclui vários arquivos de teste na pasta `src/server/tests/`:
-- `teste-icec.ts` - Teste isolado do ICEC
-- `teste-icf.ts` - Teste isolado do ICF  
-- `teste-peic-final.ts` - Teste isolado do PEIC
-- `teste-multiplas-regioes.ts` - Teste com múltiplas regiões
-
-## 📈 Monitoramento e Logs
-
-O sistema fornece logs detalhados durante a execução:
-- ✅ Sucessos com estatísticas
-- ❌ Erros com detalhes
-- 📊 Progress de processamento
-- ⏱️ Tempo de execução
-- 💾 Estatísticas de salvamento
-
-## 🚨 Tratamento de Erros
-
-- **Conexão com Banco**: Falha graceful com log de erro
-- **Download de Arquivos**: Retry automático e skip em falha
-- **Processamento Excel**: Validação de dados e log de inconsistências
-- **Duplicatas**: Prevenção através de chaves únicas
-
-## 🤝 Contribuição
-
-1. Fork o projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/nova-feature`)
-3. Commit suas mudanças (`git commit -am 'Adiciona nova feature'`)
-4. Push para a branch (`git push origin feature/nova-feature`)
-5. Abra um Pull Request
-
-## 📝 Licença
-
-Este projeto está sob a licença MIT. Veja o arquivo LICENSE para mais detalhes.
-
-## 📞 Suporte
-
-Para dúvidas ou problemas:
-- Abra uma issue no repositório
-- Entre em contato com a equipe de desenvolvimento da FeComércio/ES
 
 ---
 
-**Desenvolvido com ❤️ para FeComércio/ES**
+## 📅 Funcionamento dos Serviços
+
+### ICEC - Índice de Confiança do Empresário do Comércio
+- **Período**: Janeiro/2010 → presente
+- **Agendamento**: Todo dia 1 às 02:00
+- **Dados coletados**: Índices por porte de empresa e segmento comercial
+
+### ICF - Índice de Confiança do Consumidor
+- **Período**: Abril/2012 → presente  
+- **Agendamento**: Todo dia 1 às 05:00
+- **Dados coletados**: Índices de satisfação e expectativa do consumidor
+
+### PEIC - Pesquisa de Endividamento e Inadimplência
+- **Período**: Março/2012 → mês anterior
+- **Agendamento**: Todo dia 1 às 08:00
+- **Dados coletados**: Percentuais de endividamento por faixa de renda
+
+---
+
+## 🔄 Fluxo de Processamento
+
+### 1. Método Principal - Download de Planilhas
+```mermaid
+graph TD
+    A[Início] --> B[Gerar períodos]
+    B --> C[Download planilha Excel]
+    C --> D[Extrair dados]
+    D --> E[Validar dados]
+    E --> F[Salvar no banco]
+    F --> G[Limpar arquivo temp]
+    G --> H[Próximo período]
+    H --> C
+```
+
+### 2. Método de Fallback - Web Scraping
+Em caso de falha no download, o sistema utiliza web scraping:
+- Abertura automatizada do navegador
+- Login no portal CNC
+- Navegação e filtros por período/região
+- Extração dos dados da tabela gerada
+- Processamento e armazenamento
+
+### 3. Características do Processamento
+- **Prevenção de duplicatas**: Verificação antes de inserir dados
+- **Limpeza automática**: Remoção de dados antigos antes de reprocessar
+- **Logs detalhados**: Acompanhamento completo do processo
+- **Retry inteligente**: Segunda tentativa com método alternativo
+
+---
+
+## 🗄️ Estrutura do Banco de Dados
+
+### Tabela: icecs
+```sql
+- id (UUID, PK)
+- ICEC (FLOAT) - Índice geral
+- ATÉ_50 (FLOAT) - Empresas até 50 funcionários  
+- MAIS_DE_50 (FLOAT) - Empresas com mais de 50 funcionários
+- SEMIDURAVEIS (FLOAT) - Segmento semiduráveis
+- NAO_DURAVEIS (FLOAT) - Segmento não duráveis
+- DURAVEIS (FLOAT) - Segmento duráveis
+- MES (INT) - Mês de referência
+- ANO (INT) - Ano de referência
+- REGIAO (ENUM) - BR ou ES
+- METODO (ENUM) - Planilha ou Web Scraping
+- data_criacao (TIMESTAMP)
+- data_atualizacao (TIMESTAMP)
+```
+
+### Tabela: icfs
+```sql
+- id (UUID, PK)
+- ICF (FLOAT) - Índice geral
+- SITUACAO_ATUAL (FLOAT) - Avaliação situação atual
+- EXPECTATIVAS (FLOAT) - Expectativas futuras
+- MES (INT) - Mês de referência
+- ANO (INT) - Ano de referência
+- REGIAO (ENUM) - BR ou ES
+- METODO (ENUM) - Planilha ou Web Scraping
+- data_criacao (TIMESTAMP)
+- data_atualizacao (TIMESTAMP)
+```
+
+### Tabela: peics
+```sql
+- id (UUID, PK)
+- ENDIVIDADOS (FLOAT) - % de famílias endividadas
+- ATE_1000 (FLOAT) - Renda até R$ 1.000
+- _1000_3000 (FLOAT) - Renda R$ 1.000-3.000
+- _3000_5000 (FLOAT) - Renda R$ 3.000-5.000
+- _5000_10000 (FLOAT) - Renda R$ 5.000-10.000
+- MAIS_10000 (FLOAT) - Renda acima R$ 10.000
+- MES (INT) - Mês de referência
+- ANO (INT) - Ano de referência
+- REGIAO (ENUM) - BR ou ES
+- METODO (ENUM) - Planilha ou Web Scraping
+- data_criacao (TIMESTAMP)
+- data_atualizacao (TIMESTAMP)
+```
+
+---
+
+## 🔧 Scripts Disponíveis
+
+```bash
+# Desenvolvimento
+npm run start          # Inicia aplicação (modo produção)
+npm run dev            # Inicia com hot-reload
+npm run force          # Executa processamento imediato
+
+# Banco de Dados
+npm run typeorm        # CLI do TypeORM
+npm run migration:generate  # Gera nova migração
+npm run migration:run       # Executa migrações
+npm run migration:revert    # Reverte última migração
+
+# Build
+npm run build          # Compila TypeScript para JavaScript
+```
+
+---
+
+## 📊 Monitoramento e Logs
+
+### Logs Estruturados
+O sistema produz logs detalhados para acompanhamento:
+
+```
+🚀 Iniciando processamento completo dos dados ICEC...
+🗑️ Limpeza do banco de dados concluída. Registros removidos: 1,245
+📍 Regiões a processar: BR, ES
+
+Processando período: BR 01/2024
+✅ Período BR 01/2024 processado com sucesso
+
+=== Processamento concluído ===
+Sucessos: 156
+Erros: 2  
+Total: 158
+```
+
+### Indicadores de Performance
+- Tempo médio de processamento por período
+- Taxa de sucesso vs fallback para web scraping
+- Quantidade de registros processados por execução
+
+---
+
+## 🆚 Comparação: Projeto ICEC Antigo vs CNC Atual
+
+### Projeto ICEC (Versão Anterior)
+
+#### ❌ **Problemas Críticos Identificados**
+
+**Segurança:**
+- Credenciais hardcoded no código fonte
+- Variáveis de ambiente expostas no repositório
+- Sem criptografia de dados sensíveis
+
+**Arquitetura:**
+- Sistema monolítico em arquivo único (`index.ts`)
+- Ausência de separação de responsabilidades
+- Dependências não gerenciadas adequadamente
+
+**Tratamento de Erros:**
+- Try-catch genérico sem especificidade
+- Retry limitado e inadequado
+- Logs insuficientes para debugging
+- Falhas silenciosas mascaradas como sucesso
+
+**Performance:**
+- Processamento sequencial ineficiente
+- Falta de paralelização de tarefas
+- Ausência de validação de dados
+
+**Manutenção:**
+- Código não modular
+- Difícil escalabilidade
+- Debugging complexo
+
+#### 🔧 **Características Técnicas**
+```typescript
+// Exemplo de código problemático do projeto antigo
+await page.getByLabel('Username or Email').fill('usuario@hardcoded.com');
+await page.getByLabel('Senha').fill('senhaHardcoded123');
+
+// Processamento sequencial
+for (let year = initialYear; year <= currentYear; year++) {
+  const br = await extract(year, currentMonth, 'BR');
+  const es = await extract(year, currentMonth, 'ES');
+}
+```
+
+### 🆕 **CNC (Versão Atual) - Melhorias Implementadas**
+
+#### ✅ **Soluções e Melhorias**
+
+**Segurança Aprimorada:**
+- Variáveis de ambiente protegidas (`.env`)
+- Credenciais não expostas no código
+- Configuração segura de banco de dados
+
+**Arquitetura Modular:**
+- Separação por serviços (`IcecService`, `IcfService`, `PeicService`)
+- Orquestrador centralizado (`TaskOrchestrator`)
+- Repositórios especializados por entidade
+- Interfaces bem definidas
+
+**Tratamento de Erros Robusto:**
+- Try-catch específico por operação
+- Sistema de retry com fallback
+- Logs estruturados e informativos
+- Monitoramento de falhas por período
+
+**Performance Otimizada:**
+- Processamento paralelo quando possível
+- Validação robusta de dados
+- Limpeza automática de arquivos temporários
+- Cache de conexões de banco
+
+**Manutenibilidade:**
+- Código modular e testável
+- TypeScript com tipagem forte
+- Migrations automáticas de banco
+- Scripts organizados no package.json
+
+#### 🔧 **Exemplo de Código Melhorado**
+```typescript
+// Configuração segura
+private baseUrl = process.env.BASE_URL || 'https://backend.pesquisascnc.com.br/admin/4/upload';
+
+// Tratamento de erro específico
+try {
+    const filePath = await this.downloadFile(mes, ano, regiao);
+    const data = await this.extractDataFromExcel(filePath, mes, ano, regiao);
+    await this.saveToDatabase(data);
+} catch (error) {
+    console.log(`✗ Erro no período ${regiao} ${mes}/${ano}: ${error}`);
+    erros.push({ regiao, mes, ano });
+}
+
+// Sistema de fallback
+if (erros.length > 0) {
+    console.log(`🔄 Iniciando segunda tentativa com web scraping...`);
+    await this.retryWithWebScraping(erros);
+}
+```
+
+### 📈 **Comparativo de Resultados**
+
+| Aspecto | ICEC Antigo | CNC Atual |
+|---------|-------------|-----------|
+| **Segurança** | 🔴 Crítico | ✅ Seguro |
+| **Arquitetura** | 🔴 Monolítica | ✅ Modular |
+| **Manutenção** | 🔴 Difícil | ✅ Fácil |
+| **Escalabilidade** | 🔴 Limitada | ✅ Escalável |
+| **Confiabilidade** | 🟡 Média | ✅ Alta |
+| **Performance** | 🟡 Sequencial | ✅ Otimizada |
+| **Cobertura** | 🟡 Apenas ICEC | ✅ ICEC + ICF + PEIC |
+| **Fallback** | ❌ Não possui | ✅ Web Scraping |
+
+### 🎯 **Benefícios da Migração**
+
+1. **Expansão de Cobertura**: De 1 para 3 indicadores econômicos
+2. **Maior Robustez**: Sistema de fallback automático  
+3. **Melhor Monitoramento**: Logs estruturados e informativos
+4. **Facilidade de Manutenção**: Código modular e bem documentado
+5. **Segurança**: Eliminação de vulnerabilidades críticas
+6. **Escalabilidade**: Fácil adição de novos indicadores
+
+---
+
+## 🤝 Contribuição
+
+### Como Contribuir
+1. Fork o projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
+
+### Padrões de Código
+- Use TypeScript com tipagem forte
+- Siga os padrões ESLint configurados
+- Adicione testes para novas funcionalidades
+- Mantenha a documentação atualizada
+
+---
+
+## 📝 Roadmap
+
+### Versão 2.0 (Planejado)
+- [ ] API REST para consulta de dados
+- [ ] Dashboard web para visualização
+- [ ] Notificações via Telegram/Slack
+- [ ] Exportação para diferentes formatos
+- [ ] Análise estatística automatizada
+
+### Versão 1.5 (Em desenvolvimento)
+- [ ] Testes automatizados (Jest)
+- [ ] Docker containerization
+- [ ] CI/CD pipeline
+- [ ] Backup automatizado do banco
+
+---
+
+## 📄 Licença
+
+Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
+
+---
+
+## 📞 Suporte
+
+Para suporte técnico ou dúvidas sobre o projeto:
+
+- **Email**: [seu-email@empresa.com]
+- **Documentação**: Consulte este README
+- **Issues**: Abra uma issue no repositório
+
+---
+
+## 🏆 Créditos
+
+Desenvolvido com ❤️ para automatização de coleta de dados econômicos da CNC.
+
+**Autor**: Ivan Belshoff  
+**Empresa**: FeComércio ES  
+**Projeto**: Sistema de Indicadores Econômicos CNC  
+
+---
+
+*Última atualização: Julho 2025*
