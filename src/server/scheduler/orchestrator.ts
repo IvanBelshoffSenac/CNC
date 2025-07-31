@@ -19,7 +19,7 @@ export class TaskOrchestrator {
      */
     private async runIcec(): Promise<void> {
         try {
-            console.log('📊 [CRON] Iniciando ICEC (Março/2012 → presente)...');
+            console.log('📊 [CRON] Iniciando ICEC (Janeiro/2010 → presente)...');
             const icecService = new IcecService();
             await icecService.processAllIcecData(['BR', 'ES']);
             console.log('✅ [CRON] ICEC concluído\n');
@@ -33,7 +33,7 @@ export class TaskOrchestrator {
      */
     private async runIcf(): Promise<void> {
         try {
-            console.log('📈 [CRON] Iniciando ICF (Abril/2012 → presente)...');
+            console.log('📈 [CRON] Iniciando ICF (Janeiro/2010 → presente)...');
             const icfService = new IcfService();
             await icfService.processAllIcfData(['BR', 'ES']);
             console.log('✅ [CRON] ICF concluído\n');
@@ -47,7 +47,7 @@ export class TaskOrchestrator {
      */
     private async runPeic(): Promise<void> {
         try {
-            console.log('📋 [CRON] Iniciando PEIC (Março/2012 → mês passado)...');
+            console.log('📋 [CRON] Iniciando PEIC (Janeiro/2010 → mês passado)...');
             const peicService = new PeicService();
             await peicService.processAllPeicData(['BR', 'ES']);
             console.log('✅ [CRON] PEIC concluído\n');
@@ -80,7 +80,7 @@ export class TaskOrchestrator {
             console.log('🎉 === PROCESSAMENTO FORÇADO FINALIZADO ===');
             console.log(`⏱️  Tempo total: ${duration} minutos`);
             console.log('📊 Todos os índices foram processados e salvos no banco de dados');
-            console.log('💾 Dados históricos desde 2012 até presente disponíveis\n');
+            console.log('💾 Dados históricos desde 2010 até presente disponíveis\n');
 
         } catch (error) {
             console.error('❌ Erro durante o processamento forçado:', error);

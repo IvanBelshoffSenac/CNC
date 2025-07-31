@@ -150,12 +150,12 @@ npm run force
 - **Dados coletados**: Índices por porte de empresa e segmento comercial
 
 ### ICF - Índice de Confiança do Consumidor
-- **Período**: Abril/2012 → presente  
+- **Período**: Janeiro/2010 → presente  
 - **Agendamento**: Todo dia 1 às 05:00
 - **Dados coletados**: Índices de satisfação e expectativa do consumidor
 
 ### PEIC - Pesquisa de Endividamento e Inadimplência
-- **Período**: Março/2012 → mês anterior
+- **Período**: Janeiro/2010 → mês anterior
 - **Agendamento**: Todo dia 1 às 08:00
 - **Dados coletados**: Percentuais de endividamento por faixa de renda
 
