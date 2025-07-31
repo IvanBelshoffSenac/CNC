@@ -95,22 +95,33 @@ npm install
 ```
 
 ### 3. Configure as variáveis de ambiente
-Crie um arquivo `.env` na raiz do projeto:
+Crie um arquivo `.env` na raiz do projeto baseado no `.env.example`:
 
 ```env
-# Configurações do Banco de Dados
-DB_HOST=localhost
-DB_PORT=3306
-DB_USERNAME=seu_usuario
-DB_PASSWORD=sua_senha
-DB_DATABASE=cnc_database
+# Definição do Ambiente
+NODE_ENV=development
 
-# URL Base para Downloads
+# Configurações do Banco de Dados
+HOST=localhost
+DB_USER=seu_usuario
+DB_NAME=cnc_database
+DB_PORT=3306
+PASSWORD=sua_senha
+
+# Configurações do Web Scraping (credenciais do portal CNC)
+CREDENTIALS_USER=seu_usuario_cnc
+CREDENTIALS_PASSWORD=sua_senha_cnc
+
+# URL Base da API para Downloads
 BASE_URL=https://backend.pesquisascnc.com.br/admin/4/upload
 
-# Configurações Opcionais
-NODE_ENV=development
+# URLs dos Sites (opcionais - usam valores padrão se não informadas)
+BASE_URL_SITE_PEIC=https://pesquisascnc.com.br/pesquisa-peic/
+BASE_URL_SITE_ICEC=https://pesquisascnc.com.br/pesquisa-icec/
+BASE_URL_SITE_ICF=https://pesquisascnc.com.br/pesquisa-icf/
 ```
+
+⚠️ **Importante**: As credenciais `CREDENTIALS_USER` e `CREDENTIALS_PASSWORD` são necessárias para o sistema de fallback via web scraping. Utilize as credenciais de acesso ao portal da CNC.
 
 ### 4. Execute as migrações do banco
 ```bash
@@ -417,39 +428,6 @@ if (erros.length > 0) {
 - Siga os padrões ESLint configurados
 - Adicione testes para novas funcionalidades
 - Mantenha a documentação atualizada
-
----
-
-## 📝 Roadmap
-
-### Versão 2.0 (Planejado)
-- [ ] API REST para consulta de dados
-- [ ] Dashboard web para visualização
-- [ ] Notificações via Telegram/Slack
-- [ ] Exportação para diferentes formatos
-- [ ] Análise estatística automatizada
-
-### Versão 1.5 (Em desenvolvimento)
-- [ ] Testes automatizados (Jest)
-- [ ] Docker containerization
-- [ ] CI/CD pipeline
-- [ ] Backup automatizado do banco
-
----
-
-## 📄 Licença
-
-Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
-
----
-
-## 📞 Suporte
-
-Para suporte técnico ou dúvidas sobre o projeto:
-
-- **Email**: [seu-email@empresa.com]
-- **Documentação**: Consulte este README
-- **Issues**: Abra uma issue no repositório
 
 ---
 
