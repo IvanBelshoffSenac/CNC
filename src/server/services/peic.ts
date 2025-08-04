@@ -502,9 +502,7 @@ export class PeicService {
             NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL: tableData.NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL,
             ENDIVIDADOS_ABSOLUTO: tableData.ENDIVIDADOS_ABSOLUTO,
             CONTAS_EM_ATRASO_ABSOLUTO: tableData.CONTAS_EM_ATRASO_ABSOLUTO,
-            NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO: tableData.NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO,
-            data_criacao: new Date(),
-            data_atualizacao: new Date()
+            NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO: tableData.NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO
         };
 
         console.log('📈 Dados extraídos:', tableData);

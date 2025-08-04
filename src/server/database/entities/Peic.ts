@@ -37,8 +37,5 @@ export class Peic {
     METODO: Metodo;
 
     @CreateDateColumn()
-    data_criacao: Date
-
-    @UpdateDateColumn()
-    data_atualizacao: Date
+    data_criacao?: Date
 }

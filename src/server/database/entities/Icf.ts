@@ -39,7 +39,4 @@ export class Icf {
 
     @CreateDateColumn()
     data_criacao?: Date
-
-    @UpdateDateColumn()
-    data_atualizacao?: Date
 }

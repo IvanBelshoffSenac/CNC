@@ -197,19 +197,20 @@ export class IcfService {
     }
 
     private generatePeriods(): Array<{ mes: number, ano: number }> {
-        const periods = [];
-        const startDate = new Date(2010, 1); // Janeiro 2010 (mês 0-indexed)
+        const periods: Array<{ mes: number; ano: number }> = [];
         const currentDate = new Date();
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth() + 1;
 
-        let date = new Date(startDate);
-        while (date <= currentDate) {
-            periods.push({
-                mes: date.getMonth() + 1,
-                ano: date.getFullYear()
-            });
-            date.setMonth(date.getMonth() + 1);
+        // Janeiro 2010 até período atual
+        for (let ano = 2010; ano <= currentYear; ano++) {
+            const startMonth = ano === 2010 ? 1 : 1;
+            const endMonth = ano === currentYear ? currentMonth : 12;
+
+            for (let mes = startMonth; mes <= endMonth; mes++) {
+                periods.push({ mes, ano });
+            }
         }
-
         return periods;
     }
 
@@ -240,6 +241,9 @@ export class IcfService {
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
         const periods = this.generatePeriods();
+
+        console.log(periods);
+
         let processados = 0;
         let sucessos = 0;
         let erros: IErrorService[] = [];
@@ -438,7 +442,7 @@ export class IcfService {
         // Extrair dados da tabela - ICF precisa de dados atuais e anteriores
         const currentTableData = await this.extractTableData(page, mes, ano);
         const previousPeriod = this.getPreviousPeriod(mes, ano);
-        
+
         // Buscar dados do período anterior
         await this.navigateToNewPeriod(page, previousPeriod.mes, previousPeriod.ano, regiao);
         const previousTableData = await this.extractTableData(page, previousPeriod.mes, previousPeriod.ano);
@@ -567,9 +571,7 @@ export class IcfService {
             MES: 0,
             ANO: 0,
             REGIAO: Regiao.BR,
-            METODO: Metodo.WS,
-            data_criacao: new Date(),
-            data_atualizacao: new Date()
+            METODO: Metodo.WS
         };
     }
 }

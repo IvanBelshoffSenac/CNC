@@ -356,9 +356,7 @@ export class IcecService {
             MAIS_DE_50: tableData.MAIS_DE_50,
             SEMIDURAVEIS: tableData.SEMIDURAVEIS,
             NAO_DURAVEIS: tableData.NAO_DURAVEIS,
-            DURAVEIS: tableData.DURAVEIS,
-            data_criacao: new Date(),
-            data_atualizacao: new Date()
+            DURAVEIS: tableData.DURAVEIS
         };
 
         console.log('📈 Dados extraídos:', tableData);
