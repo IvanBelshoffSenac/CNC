@@ -30,6 +30,7 @@
       "dev": "ts-node-dev ./src/index.ts",
       "force": "ts-node ./src/force.ts",
       "test-notification": "ts-node ./src/test-notification.ts",
+      "test-periodo-config": "ts-node ./src/server/tests/teste-periodo-config.ts",
       "typeorm": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts",
       "build": "tsc",
       "migration:generate": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts migration:generate ./src/server/database/migrations/default",

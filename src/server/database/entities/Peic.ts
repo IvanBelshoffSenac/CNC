@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from "typeorm";
 import { Metodo, Regiao } from "../../shared/interfaces";
 
 @Entity('peics')
@@ -37,5 +37,5 @@ export class Peic {
     METODO: Metodo;
 
     @CreateDateColumn()
-    data_criacao?: Date
+    DATA_INSERCAO?: Date
 }

@@ -37,5 +37,5 @@ export class Icec {
     METODO: Metodo;
 
     @CreateDateColumn()
-    data_criacao?: Date
+    DATA_INSERCAO?: Date
 }

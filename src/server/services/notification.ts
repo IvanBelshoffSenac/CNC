@@ -129,9 +129,14 @@ export class NotificationService {
         const totalFalhasGeral = resultados.reduce((total, r) => total + r.falhas, 0);
         const totalTasksGeral = resultados.reduce((total, r) => total + r.tasks.length, 0);
 
-        // Ícone baseado no modo de execução
-        const iconeExecucao = modoExecucao === 'Agendado' ? '⏰' : '🚀';
-        const descricaoExecucao = modoExecucao === 'Agendado' ? 'Execução Agendada' : 'Execução Forçada';
+        // Consolidar todas as regiões distintas processadas entre todos os serviços
+        const todasRegioes = new Set<string>();
+        resultados.forEach(resultado => {
+            resultado.tasks.forEach(task => {
+                todasRegioes.add(task.regiao);
+            });
+        });
+        const regioesConsolidadas = Array.from(todasRegioes).sort().join(', ');
 
         let corpoEmail = `
         <!DOCTYPE html>
@@ -164,6 +169,7 @@ export class NotificationService {
                 <div class="stats">✅ <strong>Sucessos:</strong> ${totalSucessosGeral}</div>
                 <div class="stats">❌ <strong>Falhas:</strong> ${totalFalhasGeral}</div>
                 <div class="stats">🎯 <strong>Taxa de Sucesso:</strong> ${Math.round((totalSucessosGeral / totalTasksGeral) * 100)}%</div>
+                <div class="stats">🌎 <strong>Regiões Apuradas:</strong> ${regioesConsolidadas}</div>
                 <div class="stats">🔄 <strong>Modo de Execução:</strong> ${modoExecucao}</div>
             </div>
         `;
@@ -173,11 +179,15 @@ export class NotificationService {
             const taxaSucesso = Math.round((resultado.sucessos / resultado.tasks.length) * 100);
             const statusClass = taxaSucesso >= 90 ? 'success' : taxaSucesso >= 70 ? 'warning' : 'error';
 
+            // Extrair regiões únicas dos tasks
+            const regioesApuradas = [...new Set(resultado.tasks.map(task => task.regiao))].sort();
+
             corpoEmail += `
             <div class="service-section">
                 <h3>📋 ${resultado.servico}</h3>
                 <p><strong>Período:</strong> ${resultado.periodoInicio} → ${resultado.periodoFim}</p>
                 <p><strong>Tempo de Execução:</strong> ${Math.round(resultado.tempoExecucao / 60)} minutos (${resultado.tempoExecucao} segundos)</p>
+                <p><strong>Regiões Apuradas:</strong> ${regioesApuradas.join(', ')}</p>
                 
                 <div class="stats">📊 <strong>Total de Registros:</strong> ${resultado.totalRegistros}</div>
                 <br>

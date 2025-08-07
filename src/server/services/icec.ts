@@ -7,7 +7,8 @@ import { Icec } from '../database/entities/Icec';
 import { icecRepository } from '../database/repositories/icecRepository';
 import { Regiao, Metodo, IErrorService, ITask, IServiceResult } from '../shared/interfaces';
 import { 
-    generatePeriods, 
+    generateServicePeriods,
+    extractServicePeriodRange,
     formatPeriod, 
     formatPeriodDisplay, 
     calculateExecutionTime, 
@@ -32,7 +33,7 @@ export class IcecService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = generatePeriods();
+        const periods = generateServicePeriods('ICEC');
         const tasks: ITask[] = [];
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;
@@ -96,10 +97,13 @@ export class IcecService {
         
         const { sucessos, falhas } = calculateTaskStats(tasks);
 
+        // Extrair períodos dinamicamente
+        const { periodoInicio, periodoFim } = extractServicePeriodRange(periods);
+
         const resultado: IServiceResult = {
             servico: 'ICEC',
-            periodoInicio: '01/2010',
-            periodoFim: formatPeriod(),
+            periodoInicio,
+            periodoFim,
             tempoExecucao,
             tasks,
             totalRegistros: tasks.length, // Total geral (sucessos + falhas)
@@ -130,7 +134,7 @@ export class IcecService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = generatePeriods();
+        const periods = generateServicePeriods('ICEC');
         let processados = 0;
         let sucessos = 0;
         let erros: IErrorService[] = [];

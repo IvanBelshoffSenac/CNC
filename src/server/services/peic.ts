@@ -8,6 +8,8 @@ import { Peic } from '../database/entities';
 import { Regiao, Metodo, IErrorService, ITask, IServiceResult } from '../shared/interfaces';
 import { 
     generatePeriods, 
+    generateServicePeriods,
+    extractServicePeriodRange,
     formatPeriod, 
     formatPeriodDisplay, 
     calculateExecutionTime, 
@@ -32,7 +34,7 @@ export class PeicService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = generatePeriods(true); // PEIC vai até mês anterior
+        const periods = generateServicePeriods('PEIC');
         const tasks: ITask[] = [];
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;
@@ -95,10 +97,13 @@ export class PeicService {
         
         const { sucessos, falhas } = calculateTaskStats(tasks);
 
+        // Extrair períodos dinamicamente
+        const { periodoInicio, periodoFim } = extractServicePeriodRange(periods);
+
         const resultado: IServiceResult = {
             servico: 'PEIC',
-            periodoInicio: '01/2010',
-            periodoFim: formatPeriod(undefined, true), // PEIC vai até mês passado
+            periodoInicio,
+            periodoFim,
             tempoExecucao,
             tasks,
             totalRegistros: tasks.length, // Total geral (sucessos + falhas)
@@ -129,7 +134,7 @@ export class PeicService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = generatePeriods(true); // PEIC vai até mês anterior
+        const periods = generateServicePeriods('PEIC');
         let processados = 0;
         let sucessos = 0;
         let erros: IErrorService[] = [];

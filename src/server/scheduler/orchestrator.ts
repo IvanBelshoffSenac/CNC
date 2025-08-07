@@ -4,6 +4,7 @@ import { IcfService } from '../services/icf';
 import { PeicService } from '../services/peic';
 import { NotificationService } from '../services/notification';
 import { IServiceResult } from '../shared/interfaces';
+import { getServiceRegions } from '../shared/utils';
 
 export class TaskOrchestrator {
     private isRunning: boolean = false;
@@ -25,7 +26,8 @@ export class TaskOrchestrator {
         try {
             console.log('📊 [CRON] Iniciando ICEC com monitoramento (Janeiro/2010 → presente)...');
             const icecService = new IcecService();
-            const resultado = await icecService.processAllIcecDataWithMonitoring(['BR', 'ES']);
+            const regioes = getServiceRegions('ICEC');
+            const resultado = await icecService.processAllIcecDataWithMonitoring(regioes);
             console.log('✅ [CRON] ICEC concluído\n');
             return resultado;
         } catch (error) {
@@ -41,7 +43,8 @@ export class TaskOrchestrator {
         try {
             console.log('📈 [CRON] Iniciando ICF com monitoramento (Janeiro/2010 → presente)...');
             const icfService = new IcfService();
-            const resultado = await icfService.processAllIcfDataWithMonitoring(['BR', 'ES']);
+            const regioes = getServiceRegions('ICF');
+            const resultado = await icfService.processAllIcfDataWithMonitoring(regioes);
             console.log('✅ [CRON] ICF concluído\n');
             return resultado;
         } catch (error) {
@@ -57,7 +60,8 @@ export class TaskOrchestrator {
         try {
             console.log('📋 [CRON] Iniciando PEIC com monitoramento (Janeiro/2010 → mês passado)...');
             const peicService = new PeicService();
-            const resultado = await peicService.processAllPeicDataWithMonitoring(['BR', 'ES']);
+            const regioes = getServiceRegions('PEIC');
+            const resultado = await peicService.processAllPeicDataWithMonitoring(regioes);
             console.log('✅ [CRON] PEIC concluído\n');
             return resultado;
         } catch (error) {
@@ -73,7 +77,8 @@ export class TaskOrchestrator {
         try {
             console.log('📊 [CRON] Iniciando ICEC (Janeiro/2010 → presente)...');
             const icecService = new IcecService();
-            await icecService.processAllIcecData(['BR', 'ES']);
+            const regioes = getServiceRegions('ICEC');
+            await icecService.processAllIcecData(regioes);
             console.log('✅ [CRON] ICEC concluído\n');
         } catch (error) {
             console.error('❌ [CRON] Erro no processamento ICEC:', error);
@@ -87,7 +92,8 @@ export class TaskOrchestrator {
         try {
             console.log('📈 [CRON] Iniciando ICF (Janeiro/2010 → presente)...');
             const icfService = new IcfService();
-            await icfService.processAllIcfData(['BR', 'ES']);
+            const regioes = getServiceRegions('ICF');
+            await icfService.processAllIcfData(regioes);
             console.log('✅ [CRON] ICF concluído\n');
         } catch (error) {
             console.error('❌ [CRON] Erro no processamento ICF:', error);
@@ -101,7 +107,8 @@ export class TaskOrchestrator {
         try {
             console.log('📋 [CRON] Iniciando PEIC (Janeiro/2010 → mês passado)...');
             const peicService = new PeicService();
-            await peicService.processAllPeicData(['BR', 'ES']);
+            const regioes = getServiceRegions('PEIC');
+            await peicService.processAllPeicData(regioes);
             console.log('✅ [CRON] PEIC concluído\n');
         } catch (error) {
             console.error('❌ [CRON] Erro no processamento PEIC:', error);

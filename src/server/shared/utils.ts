@@ -196,3 +196,237 @@ export const LogMessages = {
     teste: (servico: string, regiao: string, mes: number, ano: number) => 
         `📊 Testando ${servico} ${formatPeriodDisplay(regiao, mes, ano)}`
 };
+
+/**
+ * Interface para configuração de período parseada
+ */
+export interface IPeriodConfig {
+    startDate: { mes: number; ano: number };
+    endDate: { mes: number; ano: number };
+}
+
+/**
+ * Valida e parseia configuração de período do .env
+ * @param periodValue Valor do período do .env (ex: "01/2010:-1M")
+ * @param defaultStart Data inicial padrão se não fornecida
+ * @returns Configuração de período parseada
+ */
+export function parsePeriodConfig(
+    periodValue?: string, 
+    defaultStart: string = '01/2010'
+): IPeriodConfig {
+    // Se não foi fornecido valor, usar padrão
+    if (!periodValue) {
+        const currentDate = new Date();
+        const currentPeriod = formatPeriod(currentDate);
+        return parsePeriodString(`${defaultStart}:${currentPeriod}`);
+    }
+
+    return parsePeriodString(periodValue);
+}
+
+/**
+ * Parseia string de período no formato "MM/YYYY:ENDTYPE"
+ * @param periodString String no formato "01/2010:-1M" ou "01/2010:>" ou "01/2010:08/2025"
+ * @returns Configuração de período parseada
+ */
+function parsePeriodString(periodString: string): IPeriodConfig {
+    const parts = periodString.split(':');
+    
+    if (parts.length !== 2) {
+        throw new Error(`Formato de período inválido: ${periodString}. Use formato MM/YYYY:ENDTYPE`);
+    }
+
+    const [startStr, endStr] = parts;
+
+    // Validar data inicial
+    const startMatch = startStr.match(/^(\d{2})\/(\d{4})$/);
+    if (!startMatch) {
+        throw new Error(`Data inicial inválida: ${startStr}. Use formato MM/YYYY`);
+    }
+
+    const startMes = parseInt(startMatch[1], 10);
+    const startAno = parseInt(startMatch[2], 10);
+
+    if (startMes < 1 || startMes > 12) {
+        throw new Error(`Mês inicial inválido: ${startMes}. Deve estar entre 01 e 12`);
+    }
+
+    if (startAno < 2000 || startAno > 2100) {
+        throw new Error(`Ano inicial inválido: ${startAno}. Deve estar entre 2000 e 2100`);
+    }
+
+    // Processar data final
+    const endDate = parseEndDate(endStr);
+
+    return {
+        startDate: { mes: startMes, ano: startAno },
+        endDate
+    };
+}
+
+/**
+ * Parseia a parte final da configuração de período
+ * @param endStr Parte final (">", "-1M", "08/2025")
+ * @returns Data final parseada
+ */
+function parseEndDate(endStr: string): { mes: number; ano: number } {
+    // Caso 1: ">" = data atual
+    if (endStr === '>') {
+        const currentDate = new Date();
+        return {
+            mes: currentDate.getMonth() + 1,
+            ano: currentDate.getFullYear()
+        };
+    }
+
+    // Caso 2: "-XM" = X meses antes da data atual
+    const monthsBackMatch = endStr.match(/^-(\d+)M$/);
+    if (monthsBackMatch) {
+        const monthsBack = parseInt(monthsBackMatch[1], 10);
+        const currentDate = new Date();
+        currentDate.setMonth(currentDate.getMonth() - monthsBack);
+        
+        return {
+            mes: currentDate.getMonth() + 1,
+            ano: currentDate.getFullYear()
+        };
+    }
+
+    // Caso 3: Data específica "MM/YYYY"
+    const specificDateMatch = endStr.match(/^(\d{2})\/(\d{4})$/);
+    if (specificDateMatch) {
+        const endMes = parseInt(specificDateMatch[1], 10);
+        const endAno = parseInt(specificDateMatch[2], 10);
+
+        if (endMes < 1 || endMes > 12) {
+            throw new Error(`Mês final inválido: ${endMes}. Deve estar entre 01 e 12`);
+        }
+
+        if (endAno < 2000 || endAno > 2100) {
+            throw new Error(`Ano final inválido: ${endAno}. Deve estar entre 2000 e 2100`);
+        }
+
+        return { mes: endMes, ano: endAno };
+    }
+
+    throw new Error(`Formato de data final inválido: ${endStr}. Use ">", "-XM" ou "MM/YYYY"`);
+}
+
+/**
+ * Gera períodos baseado na configuração do .env
+ * @param periodConfig Configuração do período parseada
+ * @returns Array de períodos
+ */
+export function generatePeriodsFromConfig(periodConfig: IPeriodConfig): IPeriod[] {
+    const periods: IPeriod[] = [];
+    const { startDate, endDate } = periodConfig;
+
+    // Validar se data inicial não é posterior à final
+    if (startDate.ano > endDate.ano || 
+        (startDate.ano === endDate.ano && startDate.mes > endDate.mes)) {
+        throw new Error(`Data inicial (${formatMonth(startDate.mes)}/${startDate.ano}) não pode ser posterior à data final (${formatMonth(endDate.mes)}/${endDate.ano})`);
+    }
+
+    // Gerar períodos
+    for (let ano = startDate.ano; ano <= endDate.ano; ano++) {
+        const startMonth = ano === startDate.ano ? startDate.mes : 1;
+        const endMonth = ano === endDate.ano ? endDate.mes : 12;
+
+        for (let mes = startMonth; mes <= endMonth; mes++) {
+            periods.push({ mes, ano });
+        }
+    }
+
+    return periods;
+}
+
+/**
+ * Obtém configuração de período para um serviço específico
+ * @param service Nome do serviço (ICF, ICEC, PEIC)
+ * @returns Configuração de período do serviço
+ */
+export function getServicePeriodConfig(service: 'ICF' | 'ICEC' | 'PEIC'): IPeriodConfig {
+    const envKey = `PERIOD_${service}`;
+    const periodValue = process.env[envKey];
+    
+    try {
+        return parsePeriodConfig(periodValue);
+    } catch (error) {
+        console.warn(`⚠️ Erro ao parsear ${envKey}: ${error}. Usando configuração padrão.`);
+        // Fallback para configuração padrão
+        return parsePeriodConfig();
+    }
+}
+
+/**
+ * Gera períodos para um serviço específico baseado na configuração do .env
+ * @param service Nome do serviço (ICF, ICEC, PEIC)
+ * @returns Array de períodos para o serviço
+ */
+export function generateServicePeriods(service: 'ICF' | 'ICEC' | 'PEIC'): IPeriod[] {
+    const config = getServicePeriodConfig(service);
+    return generatePeriodsFromConfig(config);
+}
+
+/**
+ * Obtém as regiões configuradas para um serviço específico no arquivo .env
+ * @param service Nome do serviço (ICF, ICEC, PEIC)
+ * @returns Array de regiões, padrão ['BR'] se não configurado
+ */
+export function getServiceRegions(service: 'ICF' | 'ICEC' | 'PEIC'): string[] {
+    const envKey = `REGIONS_${service}`;
+    const regionsValue = process.env[envKey];
+    
+    // Se não está configurado ou está vazio, retorna região padrão
+    if (!regionsValue || regionsValue.trim() === '') {
+        console.log(`⚠️ ${envKey} não configurado. Usando região padrão: BR`);
+        return ['BR'];
+    }
+    
+    try {
+        // Split pela vírgula e remove espaços em branco
+        const regions = regionsValue
+            .split(',')
+            .map(region => region.trim().toUpperCase())
+            .filter(region => region.length > 0); // Remove strings vazias
+        
+        // Se após o processamento não sobrou nenhuma região válida, usar padrão
+        if (regions.length === 0) {
+            console.log(`⚠️ ${envKey} configurado mas sem regiões válidas. Usando região padrão: BR`);
+            return ['BR'];
+        }
+        
+        console.log(`✅ Regiões configuradas para ${service}: ${regions.join(', ')}`);
+        return regions;
+        
+    } catch (error) {
+        console.warn(`⚠️ Erro ao processar ${envKey}: ${error}. Usando região padrão: BR`);
+        return ['BR'];
+    }
+}
+
+/**
+ * Extrai o período inicial e final de um array de períodos
+ * @param periods Array de períodos gerados para um serviço
+ * @returns Objeto com período inicial e final formatados (MM/AAAA)
+ */
+export function extractServicePeriodRange(periods: IPeriod[]): { periodoInicio: string; periodoFim: string } {
+    if (periods.length === 0) {
+        // Fallback caso não tenha períodos configurados
+        return {
+            periodoInicio: '01/2010',
+            periodoFim: formatPeriod()
+        };
+    }
+
+    // O primeiro período é o mais antigo (início)
+    const primeiro = periods[0];
+    // O último período é o mais recente (fim)
+    const ultimo = periods[periods.length - 1];
+
+    return {
+        periodoInicio: `${primeiro.mes.toString().padStart(2, '0')}/${primeiro.ano}`,
+        periodoFim: `${ultimo.mes.toString().padStart(2, '0')}/${ultimo.ano}`
+    };
+}
