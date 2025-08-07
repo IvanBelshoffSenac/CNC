@@ -5,10 +5,109 @@ import * as path from 'path';
 import { chromium } from 'playwright';
 import { peicRepository } from '../database/repositories';
 import { Peic } from '../database/entities';
-import { Regiao, Metodo, IErrorService } from '../shared/interfaces';
+import { Regiao, Metodo, IErrorService, ITask, IServiceResult } from '../shared/interfaces';
 
 export class PeicService {
     private baseUrl = process.env.BASE_URL || 'https://backend.pesquisascnc.com.br/admin/4/upload';
+
+    /**
+     * Versão com monitoramento do processamento PEIC
+     */
+    public async processAllPeicDataWithMonitoring(regioes: string[] = ['BR']): Promise<IServiceResult> {
+        const startTime = Date.now();
+        console.log('🚀 Iniciando processamento completo dos dados PEIC com monitoramento...\n');
+
+        const resultadoLimpeza = await this.cleanDatabase();
+        console.log(resultadoLimpeza);
+
+        console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
+
+        const periods = this.generatePeriods();
+        const tasks: ITask[] = [];
+        let registrosPlanilha = 0;
+        let registrosWebScraping = 0;
+        let erros: IErrorService[] = [];
+
+        for (const period of periods) {
+            for (const regiao of regioes) {
+                try {
+                    console.log(`Processando período: ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+
+                    const filePath = await this.downloadFile(period.mes, period.ano, regiao);
+                    const data = await this.extractDataFromExcel(filePath, period.mes, period.ano, regiao);
+                    await this.saveToDatabase(data);
+                    await this.cleanupTempFile(filePath);
+
+                    console.log(`✅ Período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} processado com sucesso`);
+                    
+                    tasks.push({
+                        mes: period.mes,
+                        ano: period.ano,
+                        regiao,
+                        status: 'Sucesso',
+                        servico: 'PEIC',
+                        metodo: Metodo.PLA
+                    });
+                    
+                    registrosPlanilha++;
+
+                } catch (error) {
+                    console.log(`✗ Erro no período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${error}`);
+                    
+                    tasks.push({
+                        mes: period.mes,
+                        ano: period.ano,
+                        regiao,
+                        status: 'Falha',
+                        servico: 'PEIC',
+                        metodo: Metodo.PLA,
+                        erro: error.toString()
+                    });
+                    
+                    erros.push({
+                        regiao,
+                        mes: period.mes,
+                        ano: period.ano
+                    });
+                }
+            }
+        }
+
+        // Segunda tentativa com web scraping para os erros
+        if (erros.length > 0) {
+            console.log(`\n🔄 Iniciando segunda tentativa com web scraping para ${erros.length} períodos...`);
+            const sucessosWebScraping = await this.retryWithWebScrapingMonitoring(erros, tasks);
+            registrosWebScraping = sucessosWebScraping;
+        }
+
+        const endTime = Date.now();
+        const tempoExecucao = Math.round((endTime - startTime) / 1000);
+        
+        const sucessos = tasks.filter(t => t.status === 'Sucesso').length;
+        const falhas = tasks.filter(t => t.status === 'Falha').length;
+
+        const resultado: IServiceResult = {
+            servico: 'PEIC',
+            periodoInicio: '01/2010',
+            periodoFim: `${new Date().getMonth()}/${new Date().getFullYear()}`, // PEIC vai até mês passado
+            tempoExecucao,
+            tasks,
+            totalRegistros: registrosPlanilha + registrosWebScraping,
+            registrosPlanilha,
+            registrosWebScraping,
+            sucessos,
+            falhas
+        };
+
+        console.log(`\n=== Processamento PEIC concluído ===`);
+        console.log(`Sucessos: ${sucessos}`);
+        console.log(`Falhas: ${falhas}`);
+        console.log(`Tempo: ${Math.round(tempoExecucao / 60)} minutos`);
+        console.log(`Registros por planilha: ${registrosPlanilha}`);
+        console.log(`Registros por web scraping: ${registrosWebScraping}`);
+
+        return resultado;
+    }
 
     public async processAllPeicData(regioes: string[] = ['BR']): Promise<void> {
         console.log('🚀 Iniciando processamento completo dos dados PEIC...\n');
@@ -423,6 +522,73 @@ export class PeicService {
             console.log(`Sucessos: ${sucessosWebScraping}`);
             console.log(`Erros: ${errosWebScraping}`);
             console.log(`Total tentativas: ${errorList.length}`);
+
+        } finally {
+            await browser.close();
+        }
+    }
+
+    /**
+     * Versão com monitoramento do retry por web scraping para PEIC
+     */
+    private async retryWithWebScrapingMonitoring(errorList: IErrorService[], tasks: ITask[]): Promise<number> {
+        const browser = await chromium.launch({ headless: false });
+
+        try {
+            const page = await browser.newPage();
+
+            // Fazer login
+            await this.performLogin(page);
+
+            let sucessosWebScraping = 0;
+
+            for (const error of errorList) {
+                try {
+                    console.log(`🌐 Tentando web scraping para PEIC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
+
+                    const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
+                    await this.saveToDatabase(data);
+
+                    console.log(`✅ Web scraping bem-sucedido: PEIC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
+                    sucessosWebScraping++;
+
+                    // Atualizar task correspondente para sucesso
+                    const taskIndex = tasks.findIndex(t => 
+                        t.mes === error.mes && 
+                        t.ano === error.ano && 
+                        t.regiao === error.regiao && 
+                        t.status === 'Falha'
+                    );
+                    
+                    if (taskIndex !== -1) {
+                        tasks[taskIndex].status = 'Sucesso';
+                        tasks[taskIndex].metodo = Metodo.WS;
+                        delete tasks[taskIndex].erro;
+                    }
+
+                } catch (scrapingError) {
+                    console.log(`❌ Falha no web scraping: PEIC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano} - ${scrapingError}`);
+                    
+                    // Atualizar erro na task
+                    const taskIndex = tasks.findIndex(t => 
+                        t.mes === error.mes && 
+                        t.ano === error.ano && 
+                        t.regiao === error.regiao && 
+                        t.status === 'Falha'
+                    );
+                    
+                    if (taskIndex !== -1) {
+                        tasks[taskIndex].erro = `Planilha: ${tasks[taskIndex].erro} | Web Scraping: ${scrapingError}`;
+                    }
+                }
+            }
+
+            console.log(`\n=== Resultado do Web Scraping PEIC ===`);
+            console.log(`Sucessos: ${sucessosWebScraping}`);
+            console.log(`Erros: ${errorList.length - sucessosWebScraping}`);
+            console.log(`Total tentativas: ${errorList.length}`);
+
+            return sucessosWebScraping;
 
         } finally {
             await browser.close();
