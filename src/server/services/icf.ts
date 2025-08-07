@@ -6,6 +6,16 @@ import { chromium } from 'playwright';
 import { icfRepository } from '../database/repositories';
 import { Icf } from '../database/entities';
 import { Regiao, Metodo, IErrorService, ITask, IServiceResult } from '../shared/interfaces';
+import { 
+    generatePeriods, 
+    formatPeriod, 
+    calculateExecutionTime, 
+    calculateTaskStats, 
+    cleanupServiceTempFolder,
+    getPreviousPeriod,
+    LogMessages,
+    cleanupTempFiles
+} from '../shared/utils';
 
 interface IcfPontosData {
     NC_PONTOS: number;
@@ -33,13 +43,13 @@ export class IcfService {
 
     public async testSinglePeriod(mes: number, ano: number, regiao: string = 'BR'): Promise<void> {
         try {
-            console.log(`📊 Testando ICF ${regiao} ${mes.toString().padStart(2, '0')}/${ano}`);
+            console.log(LogMessages.teste('ICF', regiao, mes, ano));
 
             const currentUrl = this.buildUrl(mes, ano, regiao);
             const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${mes}_${ano}`);
             const currentData = await this.extractPointsFromExcel(currentFilePath);
 
-            const previousPeriod = this.getPreviousPeriod(mes, ano);
+            const previousPeriod = getPreviousPeriod(mes, ano);
             let icfData: Icf;
 
             if (previousPeriod) {
@@ -47,7 +57,7 @@ export class IcfService {
                 const previousFilePath = await this.downloadExcelFile(previousUrl, `${regiao}_${previousPeriod.mes}_${previousPeriod.ano}`);
                 const previousData = await this.extractPointsFromExcel(previousFilePath);
                 icfData = this.calculatePercentages(currentData, previousData);
-                await this.cleanupTempFiles([previousFilePath]);
+                // Arquivo será limpo ao final da execução
             } else {
                 icfData = this.calculatePercentages(currentData, { NC_PONTOS: 0, ATE_10_SM_PONTOS: 0, MAIS_DE_10_SM_PONTOS: 0 });
             }
@@ -59,7 +69,7 @@ export class IcfService {
             console.log('📈 Dados extraídos:', icfData);
 
             await this.saveToDatabase(icfData);
-            await this.cleanupTempFiles([currentFilePath]);
+            // Arquivo será limpo ao final da execução
 
             console.log(`✅ ICF ${regiao} ${mes.toString().padStart(2, '0')}/${ano} processado com sucesso`);
 
@@ -122,15 +132,11 @@ export class IcfService {
                 if (row && Array.isArray(row) && row.length >= 4) {
                     const firstCell = String(row[0] || '').toLowerCase().trim();
                     if (firstCell.includes('índice (em pontos)')) {
-                        const numericValues = row.slice(1, 4).map(val => {
-                            const num = parseFloat(String(val || '0').replace(',', '.'));
-                            return isNaN(num) ? 0 : num;
-                        });
-
-                        if (numericValues.some(val => val > 0)) {
-                            lastValidRow = row;
-                            break;
-                        }
+                        // Aceitar a linha se ela contém a descrição correta
+                        // Não importa se todos os valores são zero - isso pode ser legítimo
+                        // A validação de dados válidos será feita posteriormente se necessário
+                        lastValidRow = row;
+                        break;
                     }
                 }
             }
@@ -205,41 +211,6 @@ export class IcfService {
         }
     }
 
-    private async cleanupTempFiles(filePaths: string[]): Promise<void> {
-        for (const filePath of filePaths) {
-            try {
-                await fs.remove(filePath);
-            } catch (error) {
-                console.warn(`Aviso: não foi possível remover arquivo temporário: ${filePath}`);
-            }
-        }
-    }
-
-    private generatePeriods(): Array<{ mes: number, ano: number }> {
-        const periods: Array<{ mes: number; ano: number }> = [];
-        const currentDate = new Date();
-        const currentYear = currentDate.getFullYear();
-        const currentMonth = currentDate.getMonth() + 1;
-
-        // Janeiro 2010 até período atual
-        for (let ano = 2010; ano <= currentYear; ano++) {
-            const startMonth = ano === 2010 ? 1 : 1;
-            const endMonth = ano === currentYear ? currentMonth : 12;
-
-            for (let mes = startMonth; mes <= endMonth; mes++) {
-                periods.push({ mes, ano });
-            }
-        }
-        return periods;
-    }
-
-    private getPreviousPeriod(mes: number, ano: number): { mes: number, ano: number } {
-        if (mes === 1) {
-            return { mes: 12, ano: ano - 1 };
-        }
-        return { mes: mes - 1, ano };
-    }
-
     private async cleanDatabase(): Promise<string> {
         try {
             await icfRepository.clear();
@@ -263,7 +234,7 @@ export class IcfService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = this.generatePeriods();
+        const periods = generatePeriods();
         const tasks: ITask[] = [];
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;
@@ -274,9 +245,9 @@ export class IcfService {
                 const tempFilePaths: string[] = [];
 
                 try {
-                    console.log(`Processando período: ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+                    console.log(LogMessages.processando('ICF', regiao, period.mes, period.ano));
 
-                    const previousPeriod = this.getPreviousPeriod(period.mes, period.ano);
+                    const previousPeriod = getPreviousPeriod(period.mes, period.ano);
 
                     const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
                     const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_atual_${Date.now()}`);
@@ -331,7 +302,7 @@ export class IcfService {
                         ano: period.ano
                     });
                 } finally {
-                    await this.cleanupTempFiles(tempFilePaths);
+                    await cleanupTempFiles(tempFilePaths);
                 }
             }
         }
@@ -344,18 +315,17 @@ export class IcfService {
         }
 
         const endTime = Date.now();
-        const tempoExecucao = Math.round((endTime - startTime) / 1000);
+        const tempoExecucao = calculateExecutionTime(startTime, endTime);
         
-        const sucessos = tasks.filter(t => t.status === 'Sucesso').length;
-        const falhas = tasks.filter(t => t.status === 'Falha').length;
+        const { sucessos, falhas } = calculateTaskStats(tasks);
 
         const resultado: IServiceResult = {
             servico: 'ICF',
             periodoInicio: '01/2010',
-            periodoFim: `${new Date().getMonth() + 1}/${new Date().getFullYear()}`,
+            periodoFim: formatPeriod(),
             tempoExecucao,
             tasks,
-            totalRegistros: registrosPlanilha + registrosWebScraping,
+            totalRegistros: tasks.length, // Total geral (sucessos + falhas)
             registrosPlanilha,
             registrosWebScraping,
             sucessos,
@@ -369,6 +339,9 @@ export class IcfService {
         console.log(`Registros por planilha: ${registrosPlanilha}`);
         console.log(`Registros por web scraping: ${registrosWebScraping}`);
 
+        // Limpeza da pasta temp ao final da execução
+        await cleanupServiceTempFolder('icf', this.TEMP_DIR);
+
         return resultado;
     }
 
@@ -380,7 +353,7 @@ export class IcfService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = this.generatePeriods();
+        const periods = generatePeriods();
 
         console.log(periods);
 
@@ -396,7 +369,7 @@ export class IcfService {
                 try {
                     console.log(`Processando período: ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
 
-                    const previousPeriod = this.getPreviousPeriod(period.mes, period.ano);
+                    const previousPeriod = getPreviousPeriod(period.mes, period.ano);
 
                     const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
                     const previousUrl = this.buildUrl(previousPeriod.mes, previousPeriod.ano, regiao);
@@ -430,9 +403,8 @@ export class IcfService {
                         mes: period.mes,
                         ano: period.ano
                     });
-                } finally {
-                    await this.cleanupTempFiles(tempFilePaths);
                 }
+                // Arquivos temporários serão limpos ao final da execução
 
                 processados++;
             }
@@ -453,6 +425,9 @@ export class IcfService {
             console.log(`\n🔄 Iniciando segunda tentativa com web scraping...`);
             await this.retryWithWebScraping(erros);
         }
+
+        // Limpeza da pasta temp ao final da execução
+        await cleanupServiceTempFolder('icf', this.TEMP_DIR);
     }
 
     // Método público para testar web scraping

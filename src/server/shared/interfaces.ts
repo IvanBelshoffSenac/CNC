@@ -1,3 +1,8 @@
+export interface IPeriod {
+    mes: number;
+    ano: number;
+}
+
 export enum Regiao {
     ES = 'ES',
     BR = 'BR'

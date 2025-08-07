@@ -6,8 +6,18 @@ import { chromium } from 'playwright';
 import { Icec } from '../database/entities/Icec';
 import { icecRepository } from '../database/repositories/icecRepository';
 import { Regiao, Metodo, IErrorService, ITask, IServiceResult } from '../shared/interfaces';
+import { 
+    generatePeriods, 
+    formatPeriod, 
+    formatPeriodDisplay, 
+    calculateExecutionTime, 
+    calculateTaskStats, 
+    cleanupServiceTempFolder,
+    LogMessages
+} from '../shared/utils';
 
 export class IcecService {
+    private readonly TEMP_DIR = path.join(__dirname, '../../../temp');
     private baseUrl = process.env.BASE_URL || 'https://backend.pesquisascnc.com.br/admin/4/upload';
 
     /**
@@ -22,7 +32,7 @@ export class IcecService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = this.generatePeriods();
+        const periods = generatePeriods();
         const tasks: ITask[] = [];
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;
@@ -32,14 +42,14 @@ export class IcecService {
         for (const period of periods) {
             for (const regiao of regioes) {
                 try {
-                    console.log(`Processando período: ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+                    console.log(LogMessages.processando('ICEC', regiao, period.mes, period.ano));
 
                     const filePath = await this.downloadFile(period.mes, period.ano, regiao);
                     const data = await this.extractDataFromExcel(filePath, period.mes, period.ano, regiao);
                     await this.saveToDatabase(data);
-                    await this.cleanupTempFile(filePath);
+                    // Arquivo será limpo ao final da execução
 
-                    console.log(`✅ Período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} processado com sucesso`);
+                    console.log(LogMessages.sucesso('ICEC', regiao, period.mes, period.ano));
                     
                     tasks.push({
                         mes: period.mes,
@@ -53,7 +63,7 @@ export class IcecService {
                     registrosPlanilha++;
 
                 } catch (error) {
-                    console.log(`✗ Erro no período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${error}`);
+                    console.log(LogMessages.erro('ICEC', regiao, period.mes, period.ano, error));
                     
                     tasks.push({
                         mes: period.mes,
@@ -82,18 +92,17 @@ export class IcecService {
         }
 
         const endTime = Date.now();
-        const tempoExecucao = Math.round((endTime - startTime) / 1000);
+        const tempoExecucao = calculateExecutionTime(startTime, endTime);
         
-        const sucessos = tasks.filter(t => t.status === 'Sucesso').length;
-        const falhas = tasks.filter(t => t.status === 'Falha').length;
+        const { sucessos, falhas } = calculateTaskStats(tasks);
 
         const resultado: IServiceResult = {
             servico: 'ICEC',
             periodoInicio: '01/2010',
-            periodoFim: `${new Date().getMonth() + 1}/${new Date().getFullYear()}`,
+            periodoFim: formatPeriod(),
             tempoExecucao,
             tasks,
-            totalRegistros: registrosPlanilha + registrosWebScraping,
+            totalRegistros: tasks.length, // Total geral (sucessos + falhas)
             registrosPlanilha,
             registrosWebScraping,
             sucessos,
@@ -107,6 +116,9 @@ export class IcecService {
         console.log(`Registros por planilha: ${registrosPlanilha}`);
         console.log(`Registros por web scraping: ${registrosWebScraping}`);
 
+        // Limpeza da pasta temp ao final da execução
+        await cleanupServiceTempFolder('icec', this.TEMP_DIR);
+
         return resultado;
     }
 
@@ -118,7 +130,7 @@ export class IcecService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = this.generatePeriods();
+        const periods = generatePeriods();
         let processados = 0;
         let sucessos = 0;
         let erros: IErrorService[] = [];
@@ -127,18 +139,18 @@ export class IcecService {
         for (const period of periods) {
             for (const regiao of regioes) {
                 try {
-                    console.log(`Processando período: ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+                    console.log(LogMessages.processando('ICEC', regiao, period.mes, period.ano));
 
                     const filePath = await this.downloadFile(period.mes, period.ano, regiao);
                     const data = await this.extractDataFromExcel(filePath, period.mes, period.ano, regiao);
                     await this.saveToDatabase(data);
-                    await this.cleanupTempFile(filePath);
+                    // Arquivo será limpo ao final da execução
 
-                    console.log(`✅ Período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} processado com sucesso`);
+                    console.log(LogMessages.sucesso('ICEC', regiao, period.mes, period.ano));
                     sucessos++;
 
                 } catch (error) {
-                    console.log(`✗ Erro no período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${error}`);
+                    console.log(LogMessages.erro('ICEC', regiao, period.mes, period.ano, error));
                     erros.push({
                         regiao,
                         mes: period.mes,
@@ -158,7 +170,7 @@ export class IcecService {
         if (erros.length > 0) {
             console.log(`\n📋 Lista de períodos com erro:`);
             erros.forEach(erro => {
-                console.log(`   ❌ ${erro.regiao} ${erro.mes.toString().padStart(2, '0')}/${erro.ano}`);
+                console.log(`   ❌ ${formatPeriodDisplay(erro.regiao, erro.mes, erro.ano)}`);
             });
 
             // Segunda tentativa com web scraping
@@ -169,7 +181,7 @@ export class IcecService {
 
     public async testSinglePeriod(mes: number, ano: number, regiao: string = 'BR'): Promise<void> {
         try {
-            console.log(`📊 Testando ICEC ${regiao} ${mes.toString().padStart(2, '0')}/${ano}`);
+            console.log(LogMessages.teste('ICEC', regiao, mes, ano));
 
             const filePath = await this.downloadFile(mes, ano, regiao);
             const data = await this.extractDataFromExcel(filePath, mes, ano, regiao);
@@ -177,33 +189,14 @@ export class IcecService {
             console.log('📈 Dados extraídos:', data);
             
             await this.saveToDatabase(data);
-            await this.cleanupTempFile(filePath);
+            // Arquivo será limpo ao final da execução
 
-            console.log(`✅ ICEC ${regiao} ${mes.toString().padStart(2, '0')}/${ano} processado com sucesso`);
+            console.log(LogMessages.sucesso('ICEC', regiao, mes, ano));
 
         } catch (error) {
-            console.log(`❌ Erro ao processar ICEC ${regiao} ${mes.toString().padStart(2, '0')}/${ano}: ${error}`);
+            console.log(LogMessages.erro('ICEC', regiao, mes, ano, error));
             throw error;
         }
-    }
-
-    private generatePeriods(): Array<{ mes: number; ano: number }> {
-        const periods: Array<{ mes: number; ano: number }> = [];
-        const currentDate = new Date();
-        const currentYear = currentDate.getFullYear();
-        const currentMonth = currentDate.getMonth() + 1;
-
-        // Janeiro 2010 até período atual
-        for (let ano = 2010; ano <= currentYear; ano++) {
-            const startMonth = ano === 2010 ? 1 : 1;
-            const endMonth = ano === currentYear ? currentMonth : 12;
-
-            for (let mes = startMonth; mes <= endMonth; mes++) {
-                periods.push({ mes, ano });
-            }
-        }
-
-        return periods;
     }
 
     private async cleanDatabase(): Promise<string> {
@@ -311,14 +304,6 @@ export class IcecService {
         }
     }
 
-    private async cleanupTempFile(filePath: string): Promise<void> {
-        try {
-            await fs.remove(filePath);
-        } catch (error) {
-            // Ignora erro de limpeza
-        }
-    }
-
     // Método público para testar web scraping
     public async testWebScrapingSinglePeriod(mes: number, ano: number, regiao: string = 'BR'): Promise<void> {
         const browser = await chromium.launch({ headless: false });
@@ -329,16 +314,16 @@ export class IcecService {
             // Fazer login
             await this.performLogin(page);
 
-            console.log(`🌐 Testando web scraping para ICEC ${regiao} ${mes.toString().padStart(2, '0')}/${ano}`);
+            console.log(LogMessages.webScrapingInicio('ICEC', regiao, mes, ano));
 
             const data = await this.extractDataFromWebsite(page, mes, ano, regiao);
             await this.saveToDatabase(data);
 
-            console.log(`✅ Web scraping bem-sucedido: ICEC ${regiao} ${mes.toString().padStart(2, '0')}/${ano}`);
+            console.log(LogMessages.webScrapingSucesso('ICEC', regiao, mes, ano));
             console.log('📈 Dados salvos:', data);
 
         } catch (error) {
-            console.log(`❌ Falha no web scraping: ICEC ${regiao} ${mes.toString().padStart(2, '0')}/${ano} - ${error}`);
+            console.log(LogMessages.webScrapingFalha('ICEC', regiao, mes, ano, error));
             throw error;
         } finally {
             await browser.close();
@@ -359,16 +344,16 @@ export class IcecService {
 
             for (const error of errorList) {
                 try {
-                    console.log(`🌐 Tentando web scraping para ICEC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
+                    console.log(LogMessages.webScrapingInicio('ICEC', error.regiao, error.mes, error.ano));
 
                     const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
                     await this.saveToDatabase(data);
 
-                    console.log(`✅ Web scraping bem-sucedido: ICEC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
+                    console.log(LogMessages.webScrapingSucesso('ICEC', error.regiao, error.mes, error.ano));
                     sucessosWebScraping++;
 
                 } catch (scrapingError) {
-                    console.log(`❌ Falha no web scraping: ICEC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano} - ${scrapingError}`);
+                    console.log(LogMessages.webScrapingFalha('ICEC', error.regiao, error.mes, error.ano, scrapingError));
                     errosWebScraping++;
                 }
             }
@@ -399,12 +384,12 @@ export class IcecService {
 
             for (const error of errorList) {
                 try {
-                    console.log(`🌐 Tentando web scraping para ICEC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
+                    console.log(LogMessages.webScrapingInicio('ICEC', error.regiao, error.mes, error.ano));
 
                     const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
                     await this.saveToDatabase(data);
 
-                    console.log(`✅ Web scraping bem-sucedido: ICEC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
+                    console.log(LogMessages.webScrapingSucesso('ICEC', error.regiao, error.mes, error.ano));
                     sucessosWebScraping++;
 
                     // Atualizar task correspondente para sucesso
@@ -422,7 +407,7 @@ export class IcecService {
                     }
 
                 } catch (scrapingError) {
-                    console.log(`❌ Falha no web scraping: ICEC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano} - ${scrapingError}`);
+                    console.log(LogMessages.webScrapingFalha('ICEC', error.regiao, error.mes, error.ano, scrapingError));
                     
                     // Atualizar erro na task
                     const taskIndex = tasks.findIndex(t => 

@@ -6,8 +6,18 @@ import { chromium } from 'playwright';
 import { peicRepository } from '../database/repositories';
 import { Peic } from '../database/entities';
 import { Regiao, Metodo, IErrorService, ITask, IServiceResult } from '../shared/interfaces';
+import { 
+    generatePeriods, 
+    formatPeriod, 
+    formatPeriodDisplay, 
+    calculateExecutionTime, 
+    calculateTaskStats, 
+    cleanupServiceTempFolder,
+    LogMessages
+} from '../shared/utils';
 
 export class PeicService {
+    private readonly TEMP_DIR = path.join(__dirname, '../../../temp');
     private baseUrl = process.env.BASE_URL || 'https://backend.pesquisascnc.com.br/admin/4/upload';
 
     /**
@@ -22,7 +32,7 @@ export class PeicService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = this.generatePeriods();
+        const periods = generatePeriods(true); // PEIC vai até mês anterior
         const tasks: ITask[] = [];
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;
@@ -31,14 +41,14 @@ export class PeicService {
         for (const period of periods) {
             for (const regiao of regioes) {
                 try {
-                    console.log(`Processando período: ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+                    console.log(LogMessages.processando('PEIC', regiao, period.mes, period.ano));
 
                     const filePath = await this.downloadFile(period.mes, period.ano, regiao);
                     const data = await this.extractDataFromExcel(filePath, period.mes, period.ano, regiao);
                     await this.saveToDatabase(data);
-                    await this.cleanupTempFile(filePath);
+                    // Arquivo será limpo ao final da execução
 
-                    console.log(`✅ Período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} processado com sucesso`);
+                    console.log(LogMessages.sucesso('PEIC', regiao, period.mes, period.ano));
                     
                     tasks.push({
                         mes: period.mes,
@@ -52,7 +62,7 @@ export class PeicService {
                     registrosPlanilha++;
 
                 } catch (error) {
-                    console.log(`✗ Erro no período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${error}`);
+                    console.log(LogMessages.erro('PEIC', regiao, period.mes, period.ano, error));
                     
                     tasks.push({
                         mes: period.mes,
@@ -81,18 +91,17 @@ export class PeicService {
         }
 
         const endTime = Date.now();
-        const tempoExecucao = Math.round((endTime - startTime) / 1000);
+        const tempoExecucao = calculateExecutionTime(startTime, endTime);
         
-        const sucessos = tasks.filter(t => t.status === 'Sucesso').length;
-        const falhas = tasks.filter(t => t.status === 'Falha').length;
+        const { sucessos, falhas } = calculateTaskStats(tasks);
 
         const resultado: IServiceResult = {
             servico: 'PEIC',
             periodoInicio: '01/2010',
-            periodoFim: `${new Date().getMonth()}/${new Date().getFullYear()}`, // PEIC vai até mês passado
+            periodoFim: formatPeriod(undefined, true), // PEIC vai até mês passado
             tempoExecucao,
             tasks,
-            totalRegistros: registrosPlanilha + registrosWebScraping,
+            totalRegistros: tasks.length, // Total geral (sucessos + falhas)
             registrosPlanilha,
             registrosWebScraping,
             sucessos,
@@ -106,6 +115,9 @@ export class PeicService {
         console.log(`Registros por planilha: ${registrosPlanilha}`);
         console.log(`Registros por web scraping: ${registrosWebScraping}`);
 
+        // Limpeza da pasta temp ao final da execução
+        await cleanupServiceTempFolder('peic', this.TEMP_DIR);
+
         return resultado;
     }
 
@@ -117,7 +129,7 @@ export class PeicService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = this.generatePeriods();
+        const periods = generatePeriods(true); // PEIC vai até mês anterior
         let processados = 0;
         let sucessos = 0;
         let erros: IErrorService[] = [];
@@ -126,18 +138,18 @@ export class PeicService {
         for (const period of periods) {
             for (const regiao of regioes) {
                 try {
-                    console.log(`Processando período: ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+                    console.log(LogMessages.processando('PEIC', regiao, period.mes, period.ano));
 
                     const filePath = await this.downloadFile(period.mes, period.ano, regiao);
                     const data = await this.extractDataFromExcel(filePath, period.mes, period.ano, regiao);
                     await this.saveToDatabase(data);
-                    await this.cleanupTempFile(filePath);
+                    // Arquivo será limpo ao final da execução
 
-                    console.log(`✅ Período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} processado com sucesso`);
+                    console.log(LogMessages.sucesso('PEIC', regiao, period.mes, period.ano));
                     sucessos++;
 
                 } catch (error) {
-                    console.log(`✗ Erro no período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${error}`);
+                    console.log(LogMessages.erro('PEIC', regiao, period.mes, period.ano, error));
                     erros.push({
                         regiao,
                         mes: period.mes,
@@ -164,25 +176,6 @@ export class PeicService {
             console.log(`\n🔄 Iniciando segunda tentativa com web scraping...`);
             await this.retryWithWebScraping(erros);
         }
-    }
-
-    private generatePeriods(): Array<{ mes: number; ano: number }> {
-        const periods: Array<{ mes: number; ano: number }> = [];
-        const currentDate = new Date();
-        const currentYear = currentDate.getFullYear();
-        const currentMonth = currentDate.getMonth();
-
-        // Janeiro 2010 até período atual
-        for (let ano = 2010; ano <= currentYear; ano++) {
-            const startMonth = ano === 2010 ? 1 : 1;
-            const endMonth = ano === currentYear ? currentMonth : 12;
-
-            for (let mes = startMonth; mes <= endMonth; mes++) {
-                periods.push({ mes, ano });
-            }
-        }
-
-        return periods;
     }
 
     private async cleanDatabase(): Promise<string> {
@@ -435,18 +428,10 @@ export class PeicService {
         }
     }
 
-    private async cleanupTempFile(filePath: string): Promise<void> {
-        try {
-            await fs.remove(filePath);
-        } catch (error) {
-            // Ignora erro de limpeza
-        }
-    }
-
     // Método público para teste
     public async testSinglePeriod(mes: number, ano: number, regiao: string = 'BR'): Promise<void> {
         try {
-            console.log(`📊 Testando PEIC ${regiao} ${mes.toString().padStart(2, '0')}/${ano}`);
+            console.log(LogMessages.teste('PEIC', regiao, mes, ano));
 
             const filePath = await this.downloadFile(mes, ano, regiao);
             const data = await this.extractDataFromExcel(filePath, mes, ano, regiao);
@@ -454,12 +439,12 @@ export class PeicService {
             console.log('📈 Dados extraídos:', data);
 
             await this.saveToDatabase(data);
-            await this.cleanupTempFile(filePath);
+            // Arquivo será limpo ao final da execução
 
-            console.log(`✅ PEIC ${regiao} ${mes.toString().padStart(2, '0')}/${ano} processado com sucesso`);
+            console.log(LogMessages.sucesso('PEIC', regiao, mes, ano));
 
         } catch (error) {
-            console.log(`❌ Erro ao processar PEIC ${regiao} ${mes.toString().padStart(2, '0')}/${ano}: ${error}`);
+            console.log(LogMessages.erro('PEIC', regiao, mes, ano, error));
             throw error;
         }
     }

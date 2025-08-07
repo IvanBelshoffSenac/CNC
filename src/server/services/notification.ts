@@ -121,6 +121,8 @@ export class NotificationService {
             minute: '2-digit'
         });
 
+        console.log(resultados)
+
         const tempoTotalExecucao = resultados.reduce((total, r) => total + r.tempoExecucao, 0);
         const totalRegistrosGeral = resultados.reduce((total, r) => total + r.totalRegistros, 0);
         const totalSucessosGeral = resultados.reduce((total, r) => total + r.sucessos, 0);
@@ -141,7 +143,6 @@ export class NotificationService {
             <style>
                 body { font-family: Arial, sans-serif; margin: 20px; color: #333; }
                 .header { background-color: #2c3e50; color: white; padding: 20px; border-radius: 8px; text-align: center; }
-                .execution-mode { background-color: #3498db; color: white; padding: 10px; margin: 10px 0; border-radius: 6px; text-align: center; }
                 .summary { background-color: #ecf0f1; padding: 15px; margin: 20px 0; border-radius: 8px; }
                 .service-section { margin: 20px 0; padding: 15px; border: 1px solid #bdc3c7; border-radius: 8px; }
                 .success { color: #27ae60; font-weight: bold; }
@@ -154,10 +155,6 @@ export class NotificationService {
             <div class="header">
                 <h1>🎯 Relatório de Monitoramento CNC</h1>
                 <p>Execução realizada em: <strong>${dataExecucao}</strong></p>
-            </div>
-
-            <div class="execution-mode">
-                <h3>${iconeExecucao} ${descricaoExecucao}</h3>
             </div>
 
             <div class="summary">
@@ -183,11 +180,16 @@ export class NotificationService {
                 <p><strong>Tempo de Execução:</strong> ${Math.round(resultado.tempoExecucao / 60)} minutos (${resultado.tempoExecucao} segundos)</p>
                 
                 <div class="stats">📊 <strong>Total de Registros:</strong> ${resultado.totalRegistros}</div>
-                <div class="stats">📄 <strong>Por Planilha:</strong> ${resultado.registrosPlanilha}</div>
-                <div class="stats">🌐 <strong>Por Web Scraping:</strong> ${resultado.registrosWebScraping}</div>
+                <br>
                 
                 <div class="stats">✅ <strong>Sucessos:</strong> ${resultado.sucessos}</div>
+                <div class="stats">📄 <strong>Por Planilha:</strong> ${resultado.registrosPlanilha}</div>
+                <div class="stats">🌐 <strong>Por Web Scraping:</strong> ${resultado.registrosWebScraping}</div>
+                <br>
+                
                 <div class="stats">❌ <strong>Falhas:</strong> ${resultado.falhas}</div>
+                <br>
+                
                 <div class="stats ${statusClass}">🎯 <strong>Taxa de Sucesso:</strong> ${taxaSucesso}%</div>
             </div>
             `;
