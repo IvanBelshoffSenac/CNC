@@ -32,11 +32,11 @@ O sistema utiliza duas abordagens para obtenção dos dados:
 ## ⚡ Funcionalidades
 
 - ✅ Coleta automatizada de dados históricos (Janeiro/2010 até presente)
-- ✅ Agendamento automático via CRON (execução no dia 1 de cada mês)
+- ✅ Agendamento automático via CRON (configurável via variáveis de ambiente)
 - ✅ Dupla estratégia: Download de planilhas + Web scraping
 - ✅ Processamento para múltiplas regiões (BR, ES, etc.)
 - ✅ Armazenamento em banco de dados MySQL
-- ✅ Sistema de notificações por email
+- ✅ Sistema de notificações por email com próxima execução agendada
 - ✅ Logs detalhados e monitoramento
 - ✅ Limpeza automática de arquivos temporários
 - ✅ Relatórios de execução completos
@@ -146,6 +146,11 @@ PERIOD_PEIC=01/2010:-1M
 REGIONS_ICEC="BR,ES"
 REGIONS_ICF="BR,ES"
 REGIONS_PEIC="BR,ES"
+
+# Configurações de Agendamento (CRON)
+SCHEDULE_ICEC="0 2 1 * *"
+SCHEDULE_ICF="0 5 1 * *"
+SCHEDULE_PEIC="0 8 1 * *"
 ```
 
 > ⚠️ **Importante**: Nunca commite o arquivo `.env` com credenciais reais no repositório. Use sempre o `.env.example` como template.
@@ -259,6 +264,72 @@ REGIONS_PEIC="BR,ES"
 REGIONS_ICEC="BR,ES,RJ,SP"
 ```
 
+### Configurações Especiais - Agendamento (Schedule)
+
+O sistema permite configurar horários personalizados para execução automática de cada serviço através de expressões CRON:
+
+```env
+SCHEDULE_ICEC="0 2 1 * *"
+SCHEDULE_ICF="0 5 1 * *"
+SCHEDULE_PEIC="0 8 1 * *"
+```
+
+**Formato CRON:** `"segundo minuto hora dia mês dia_da_semana"`
+
+**Configurações Padrão:**
+- **ICEC**: `"0 2 1 * *"` = Todo dia 1 do mês às 02:00
+- **ICF**: `"0 5 1 * *"` = Todo dia 1 do mês às 05:00
+- **PEIC**: `"0 8 1 * *"` = Todo dia 1 do mês às 08:00
+
+**Exemplos de Configurações Personalizadas:**
+
+```env
+# Executar toda segunda-feira às 14:30
+SCHEDULE_ICEC="0 30 14 * * 1"
+
+# Executar todo dia 15 do mês às 16:45
+SCHEDULE_ICF="0 45 16 15 * *"
+
+# Executar a cada 6 horas
+SCHEDULE_PEIC="0 0 */6 * *"
+
+# Executar todo dia às 09:00
+SCHEDULE_ICEC="0 0 9 * * *"
+
+# Executar duas vezes por mês (dia 1 e 15)
+SCHEDULE_ICF="0 0 10 1,15 * *"
+```
+
+**Referência CRON Rápida:**
+| Campo | Valores | Exemplos |
+|-------|---------|----------|
+| Segundo | 0-59 | `0` = No segundo 0 |
+| Minuto | 0-59 | `30` = No minuto 30 |
+| Hora | 0-23 | `14` = Às 14h (2 PM) |
+| Dia | 1-31 | `1` = Dia 1 do mês |
+| Mês | 1-12 | `*` = Todos os meses |
+| Dia da Semana | 0-7 | `1` = Segunda-feira |
+
+**Caracteres Especiais:**
+- `*` = Qualquer valor
+- `*/n` = A cada n unidades (ex: `*/6` = a cada 6 horas)
+- `n-m` = Intervalo (ex: `1-5` = segunda a sexta)
+- `n,m` = Valores específicos (ex: `1,15` = dia 1 e 15)
+
+**⚠️ Observações Importantes:**
+- Se as variáveis **não forem configuradas**, o sistema usará os **valores padrão**
+- As configurações são **aplicadas na inicialização** - reinicie a aplicação após mudanças
+- Use **aspas duplas** ao definir as expressões CRON
+- O sistema exibirá no console quais configurações estão sendo utilizadas (padrão ou customizadas)
+
+### Configurações de Agendamento (Tabela de Referência)
+
+| Variável | Descrição | Valor Padrão | Exemplo Personalizado |
+|----------|-----------|--------------|----------------------|
+| `SCHEDULE_ICEC` | Agendamento para coleta ICEC | `"0 2 1 * *"` | `"0 30 14 * * 1"` |
+| `SCHEDULE_ICF` | Agendamento para coleta ICF | `"0 5 1 * *"` | `"0 45 16 15 * *"` |
+| `SCHEDULE_PEIC` | Agendamento para coleta PEIC | `"0 8 1 * *"` | `"0 0 */6 * *"` |
+
 ### Configurações de Email
 
 | Variável | Descrição |
@@ -316,10 +387,25 @@ CNC/
 
 ### 1. Agendamento Automático
 
-O sistema executa automaticamente:
-- **ICEC**: Todo dia 1 às 02:00
-- **ICF**: Todo dia 1 às 05:00
-- **PEIC**: Todo dia 1 às 08:00
+O sistema executa automaticamente conforme configurações CRON definidas:
+
+**Configurações Padrão:**
+- **ICEC**: Todo dia 1 às 02:00 (`"0 2 1 * *"`)
+- **ICF**: Todo dia 1 às 05:00 (`"0 5 1 * *"`)
+- **PEIC**: Todo dia 1 às 08:00 (`"0 8 1 * *"`)
+
+**Configurações Personalizáveis:**
+- Use as variáveis `SCHEDULE_ICEC`, `SCHEDULE_ICF`, `SCHEDULE_PEIC` no `.env`
+- Formato CRON: `"segundo minuto hora dia mês dia_da_semana"`
+- Exemplos: `"0 30 14 * * 1"` (toda segunda às 14:30), `"0 0 */6 * *"` (a cada 6 horas)
+
+**Logs de Inicialização:**
+```
+⚡ Configurações de agendamento:
+   • ICEC: 0 2 1 * * (padrão)
+   • ICF:  0 30 14 * * 1 (customizado)
+   • PEIC: 0 0 */6 * * (customizado)
+```
 
 ### 2. Processo de Coleta
 
@@ -330,7 +416,11 @@ Para cada pesquisa:
 3. **Segunda tentativa**: Web scraping para períodos com falha
 4. **Processamento** dos dados extraídos
 5. **Armazenamento** no banco de dados
-6. **Envio de relatório** por email
+6. **Envio de relatório** por email com informações detalhadas:
+   - Estatísticas de execução (sucessos, falhas, tempo)
+   - Dados por região e método de coleta
+   - **📅 Próxima execução agendada** calculada automaticamente
+   - Taxa de sucesso e recomendações
 
 ### 3. Detalhamento dos Métodos de Coleta
 
@@ -617,6 +707,69 @@ O sistema gera logs detalhados:
 - Endividados - Percentual e Absoluto
 - Contas em atraso - Percentual e Absoluto
 - Não terão condições de pagar - Percentual e Absoluto
+
+## 📧 Sistema de Notificações
+
+### Funcionalidades dos Emails de Relatório
+
+O sistema envia automaticamente emails detalhados após cada execução, incluindo:
+
+#### 📊 Informações por Serviço
+- **Período processado**: Data de início → Data fim
+- **Tempo de execução**: Em minutos e segundos
+- **Regiões processadas**: Lista das regiões coletadas
+- **Estatísticas completas**:
+  - Total de registros processados
+  - Sucessos e falhas detalhados
+  - Registros por método (Planilha vs Web Scraping)
+  - Taxa de sucesso calculada
+
+#### 📅 Próxima Execução Agendada
+**Nova funcionalidade**: Cada relatório inclui informações sobre quando será a próxima execução:
+
+```
+📅 Próxima Execução Agendada: 01/09/2025 (24 dias)
+```
+
+**Formato Inteligente:**
+- **"hoje"** - se a próxima execução for no mesmo dia
+- **"amanhã"** - se for no próximo dia
+- **"X dias"** - para outros casos
+
+**Cálculo Automático:**
+- Baseado nas configurações CRON do `.env`
+- Considera configurações personalizadas ou padrão
+- Atualizado automaticamente conforme as mudanças de schedule
+
+#### 🎯 Classificação por Taxa de Sucesso
+- **✅ Verde (≥90%)**: Execução excelente
+- **⚠️ Amarelo (70-89%)**: Execução com alertas
+- **❌ Vermelho (<70%)**: Execução com problemas
+
+#### 📎 Anexos Opcionais
+- Planilhas Excel consolidadas (quando habilitado)
+- Logs detalhados de execução
+
+### Configuração das Notificações
+
+Configure no `.env`:
+```env
+# Servidor de email
+EXCHANGE_HOST=smtp.office365.com
+EXCHANGE_PORT=587
+
+# Credenciais de envio
+MAIL_USERNAME=seu_email@dominio.com
+MAIL_PASSWORD=sua_senha
+
+# Email de destino (opcional)
+NOTIFICATION_EMAIL=destinatario@dominio.com
+```
+
+### Teste do Sistema
+```bash
+npm run test:notification
+```
 
 ---
 

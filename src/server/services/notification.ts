@@ -3,6 +3,8 @@ import * as XLSX from 'xlsx';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as dotenv from 'dotenv';
+import { addDays, addMonths, format, differenceInDays, setDate, setHours, setMinutes, setSeconds, isAfter, startOfDay } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { IServiceResult, ITask } from '../shared/interfaces';
 
 dotenv.config();
@@ -12,6 +14,75 @@ export class NotificationService {
 
     constructor() {
         this.ensureTempDirectory();
+    }
+
+    /**
+     * Calcula a próxima execução baseada no schedule CRON do serviço
+     */
+    private calcularProximaExecucao(nomeServico: string): { proximaData: Date; diasAteProxima: number; dataFormatada: string } {
+        const agora = new Date();
+        
+        // Obter schedule do ambiente ou usar padrão
+        const schedules = {
+            'ICEC': process.env.SCHEDULE_ICEC || '0 2 1 * *',
+            'ICF': process.env.SCHEDULE_ICF || '0 5 1 * *',
+            'PEIC': process.env.SCHEDULE_PEIC || '0 8 1 * *'
+        };
+
+        const schedule = schedules[nomeServico as keyof typeof schedules];
+        if (!schedule) {
+            // Fallback para serviços não mapeados
+            const proximaData = addDays(agora, 30);
+            return {
+                proximaData,
+                diasAteProxima: 30,
+                dataFormatada: format(proximaData, "dd/MM/yyyy", { locale: ptBR })
+            };
+        }
+
+        // Parse do CRON schedule (formato: "segundo minuto hora dia mês dia_semana")
+        const cronParts = schedule.split(' ');
+        const [segundo, minuto, hora, dia, mes] = cronParts;
+
+        let proximaData: Date;
+
+        // Para schedules mensais (dia específico do mês)
+        if (dia !== '*' && mes === '*') {
+            const diaDoMes = parseInt(dia);
+            const horaExecucao = parseInt(hora);
+            const minutoExecucao = parseInt(minuto);
+
+            // Calcular próxima execução para o dia específico do mês
+            let proximoMes = agora;
+            proximoMes = setDate(proximoMes, diaDoMes);
+            proximoMes = setHours(proximoMes, horaExecucao);
+            proximoMes = setMinutes(proximoMes, minutoExecucao);
+            proximoMes = setSeconds(proximoMes, 0);
+
+            // Se a data já passou este mês, ir para o próximo mês
+            if (isAfter(agora, proximoMes)) {
+                proximoMes = addMonths(proximoMes, 1);
+                proximoMes = setDate(proximoMes, diaDoMes);
+            }
+
+            proximaData = proximoMes;
+        } else {
+            // Para outros tipos de schedule, assumir próximo mês
+            proximaData = addMonths(agora, 1);
+            proximaData = setDate(proximaData, 1);
+            proximaData = setHours(proximaData, parseInt(hora || '2'));
+            proximaData = setMinutes(proximaData, parseInt(minuto || '0'));
+            proximaData = setSeconds(proximaData, 0);
+        }
+
+        const diasAteProxima = differenceInDays(startOfDay(proximaData), startOfDay(agora));
+        const dataFormatada = format(proximaData, "dd/MM/yyyy", { locale: ptBR });
+
+        return {
+            proximaData,
+            diasAteProxima,
+            dataFormatada
+        };
     }
 
     private async ensureTempDirectory(): Promise<void> {
@@ -182,6 +253,14 @@ export class NotificationService {
             // Extrair regiões únicas dos tasks
             const regioesApuradas = [...new Set(resultado.tasks.map(task => task.regiao))].sort();
 
+            // Calcular próxima execução
+            const { dataFormatada, diasAteProxima } = this.calcularProximaExecucao(resultado.servico);
+            const textoProximaExecucao = diasAteProxima === 0 
+                ? 'hoje' 
+                : diasAteProxima === 1 
+                    ? 'amanhã' 
+                    : `${diasAteProxima} dias`;
+
             corpoEmail += `
             <div class="service-section">
                 <h3>📋 ${resultado.servico}</h3>
@@ -201,6 +280,9 @@ export class NotificationService {
                 <br>
                 
                 <div class="stats ${statusClass}">🎯 <strong>Taxa de Sucesso:</strong> ${taxaSucesso}%</div>
+                <br>
+                
+                <div class="stats">📅 <strong>Próxima Execução Agendada:</strong> ${dataFormatada} (${textoProximaExecucao})</div>
             </div>
             `;
         }

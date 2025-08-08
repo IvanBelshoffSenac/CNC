@@ -11,7 +11,6 @@ async function startApplication() {
         const orchestrator = new TaskOrchestrator();
         orchestrator.startScheduler();
         
-        // Manter aplicação em execução
         process.on('SIGINT', () => {
             console.log('\n� Recebido SIGINT, encerrando aplicação...');
             process.exit(0);

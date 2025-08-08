@@ -1,4 +1,5 @@
 import * as cron from 'node-cron';
+import * as dotenv from 'dotenv';
 import { IcecService } from '../services/icec';
 import { IcfService } from '../services/icf';
 import { PeicService } from '../services/peic';
@@ -6,16 +7,18 @@ import { NotificationService } from '../services/notification';
 import { IServiceResult } from '../shared/interfaces';
 import { getServiceRegions } from '../shared/utils';
 
+// Configurar dotenv
+dotenv.config();
+
 export class TaskOrchestrator {
     private isRunning: boolean = false;
     private notificationService = new NotificationService();
 
     constructor() {
         console.log('🎯 Orquestrador de Tarefas inicializado');
-        console.log('📅 Agendamentos configurados:');
-        console.log('   • ICEC: Todo dia 1 às 02:00');
-        console.log('   • ICF:  Todo dia 1 às 05:00');
-        console.log('   • PEIC: Todo dia 1 às 08:00');
+        console.log('📅 Agendamentos serão configurados dinamicamente via variáveis de ambiente');
+        console.log('   • Configure SCHEDULE_ICEC, SCHEDULE_ICF, SCHEDULE_PEIC no .env');
+        console.log('   • Padrão: ICEC às 02:00, ICF às 05:00, PEIC às 08:00 (todo dia 1)');
         console.log('   • Relatório: Enviado automaticamente após cada execução\n');
     }
 
@@ -67,51 +70,6 @@ export class TaskOrchestrator {
         } catch (error) {
             console.error('❌ [CRON] Erro no processamento PEIC:', error);
             throw error;
-        }
-    }
-
-    /**
-     * Executa processamento individual do ICEC
-     */
-    private async runIcec(): Promise<void> {
-        try {
-            console.log('📊 [CRON] Iniciando ICEC (Janeiro/2010 → presente)...');
-            const icecService = new IcecService();
-            const regioes = getServiceRegions('ICEC');
-            await icecService.processAllIcecData(regioes);
-            console.log('✅ [CRON] ICEC concluído\n');
-        } catch (error) {
-            console.error('❌ [CRON] Erro no processamento ICEC:', error);
-        }
-    }
-
-    /**
-     * Executa processamento individual do ICF
-     */
-    private async runIcf(): Promise<void> {
-        try {
-            console.log('📈 [CRON] Iniciando ICF (Janeiro/2010 → presente)...');
-            const icfService = new IcfService();
-            const regioes = getServiceRegions('ICF');
-            await icfService.processAllIcfData(regioes);
-            console.log('✅ [CRON] ICF concluído\n');
-        } catch (error) {
-            console.error('❌ [CRON] Erro no processamento ICF:', error);
-        }
-    }
-
-    /**
-     * Executa processamento individual do PEIC
-     */
-    private async runPeic(): Promise<void> {
-        try {
-            console.log('📋 [CRON] Iniciando PEIC (Janeiro/2010 → mês passado)...');
-            const peicService = new PeicService();
-            const regioes = getServiceRegions('PEIC');
-            await peicService.processAllPeicData(regioes);
-            console.log('✅ [CRON] PEIC concluído\n');
-        } catch (error) {
-            console.error('❌ [CRON] Erro no processamento PEIC:', error);
         }
     }
 
@@ -262,22 +220,33 @@ export class TaskOrchestrator {
      * Inicia o orquestrador com agendamentos CRON (com monitoramento)
      */
     public startScheduler(): void {
-        // ICEC: Todo dia 1 às 02:00 - COM MONITORAMENTO
-        cron.schedule('0 2 1 * *', async () => {
+        // Configurações de agendamento das variáveis de ambiente ou valores padrão
+        const scheduleIcec = process.env.SCHEDULE_ICEC || '0 2 1 * *';
+        const scheduleIcf = process.env.SCHEDULE_ICF || '0 5 1 * *';
+        const schedulePeic = process.env.SCHEDULE_PEIC || '0 8 1 * *';
+
+        console.log('⚡ Configurações de agendamento:');
+        console.log(`   • ICEC: ${scheduleIcec} ${process.env.SCHEDULE_ICEC ? '(customizado)' : '(padrão)'}`);
+        console.log(`   • ICF:  ${scheduleIcf} ${process.env.SCHEDULE_ICF ? '(customizado)' : '(padrão)'}`);
+        console.log(`   • PEIC: ${schedulePeic} ${process.env.SCHEDULE_PEIC ? '(customizado)' : '(padrão)'}`);
+        console.log('');
+
+        // ICEC: Agendamento configurável - COM MONITORAMENTO
+        cron.schedule(scheduleIcec, async () => {
             await this.runTaskWithMonitoring('ICEC', () => this.runIcecWithMonitoring());
         }, {
             timezone: "America/Sao_Paulo"
         });
 
-        // ICF: Todo dia 1 às 05:00 - COM MONITORAMENTO
-        cron.schedule('0 5 1 * *', async () => {
+        // ICF: Agendamento configurável - COM MONITORAMENTO
+        cron.schedule(scheduleIcf, async () => {
             await this.runTaskWithMonitoring('ICF', () => this.runIcfWithMonitoring());
         }, {
             timezone: "America/Sao_Paulo"
         });
 
-        // PEIC: Todo dia 1 às 08:00 - COM MONITORAMENTO
-        cron.schedule('0 8 1 * *', async () => {
+        // PEIC: Agendamento configurável - COM MONITORAMENTO
+        cron.schedule(schedulePeic, async () => {
             await this.runTaskWithMonitoring('PEIC', () => this.runPeicWithMonitoring());
         }, {
             timezone: "America/Sao_Paulo"
@@ -300,12 +269,16 @@ export class TaskOrchestrator {
      * Retorna status da execução
      */
     public getStatus(): { isRunning: boolean; nextExecutions: string[] } {
+        const scheduleIcec = process.env.SCHEDULE_ICEC || '0 2 1 * *';
+        const scheduleIcf = process.env.SCHEDULE_ICF || '0 5 1 * *';
+        const schedulePeic = process.env.SCHEDULE_PEIC || '0 8 1 * *';
+
         return {
             isRunning: this.isRunning,
             nextExecutions: [
-                'ICEC: Próximo dia 1 às 02:00',
-                'ICF: Próximo dia 1 às 05:00', 
-                'PEIC: Próximo dia 1 às 08:00'
+                `ICEC: ${scheduleIcec}`,
+                `ICF: ${scheduleIcf}`, 
+                `PEIC: ${schedulePeic}`
             ]
         };
     }
