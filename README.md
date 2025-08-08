@@ -365,24 +365,62 @@ Para cada pesquisa:
 
 ### 📈 ICF (Índice de Confiança do Consumidor)
 
-#### Método 1: Download Direto de Planilha
-1. **URL construída**: `{BASE_URL}/{MES}_{ANO}/ICF/{REGIAO}.xls`
-2. **Download e processamento**: Similar ao ICEC
-3. **Extração específica**:
-   - Busca duas seções: "Pontos" e "Variação (%)"
-   - **Pontos**: NC, Até 10 SM, Mais de 10 SM
-   - **Percentuais**: NC, Até 10 SM, Mais de 10 SM
-4. **Diferencial ICF**: Coleta tanto valores absolutos quanto variações percentuais
+#### Método 1: Download Direto de Planilha (Processo Complexo)
 
-#### Método 2: Web Scraping (Fallback)
+**⚠️ Diferencial ICF**: Requer download de **duas planilhas separadas** e cálculo matemático.
+
+1. **Download de duas planilhas**:
+   - **Planilha atual**: `{BASE_URL}/{MES}_{ANO}/ICF/{REGIAO}.xls`
+   - **Planilha anterior**: `{BASE_URL}/{MES_ANTERIOR}_{ANO_ANTERIOR}/ICF/{REGIAO}.xls`
+   - **Exemplo**: Para março/2024 → baixa `3_2024` e `2_2024`
+
+2. **Extração de dados**:
+   - **Planilha atual**: Extrai valores em pontos (NC, Até 10 SM, Mais de 10 SM)
+   - **Planilha anterior**: Extrai valores em pontos do período anterior
+   - **Busca seção**: "Índice (em Pontos)" em ambas as planilhas
+
+3. **Cálculo de variação percentual**:
+   ```
+   Percentual = ((Valor_Atual - Valor_Anterior) / Valor_Anterior) × 100
+   ```
+   **Exemplo prático**:
+   ```
+   NC atual: 135,8 pontos
+   NC anterior: 134,5 pontos
+   NC percentual = ((135,8 - 134,5) / 134,5) × 100 = 0,97%
+   ```
+
+4. **Validação rigorosa**:
+   - **Ambas as planilhas** devem ser baixadas com sucesso
+   - **Se uma falhar** → todo o período é marcado como erro
+   - **Erro registrado** → será processado por web scraping
+
+5. **Dados finais armazenados**:
+   - **3 valores em pontos** (da planilha atual)
+   - **3 valores percentuais** (calculados matematicamente)
+
+#### Método 2: Web Scraping (Fallback - Sem Cálculo)
+
+**✅ Vantagem**: Dados já vêm calculados pelo site da CNC.
+
 1. **Login e navegação**: Similar ao ICEC, mas no site ICF
-2. **Extração complexa**:
-   - Tabela contém 6 colunas: 3 de pontos + 3 de percentuais
-   - Formato: `MESES | NC | ATÉ 10 SM | + DE 10 SM | NC | ATÉ 10 SM | + DE 10 SM`
+2. **Extração direta da tabela**:
+   - Tabela contém **6 colunas**: 3 de pontos + 3 de percentuais **já calculados**
+   - Formato: `MESES | NC | ATÉ 10 SM | + DE 10 SM | NC% | ATÉ 10 SM% | + DE 10 SM%`
    - Exemplo: `FEB 10 | 135,8 | 134,1 | 146,1 | 0,2 | 0,5 | -1,8`
-3. **Processamento diferenciado**: 
+3. **Processamento simples**: 
+   - **Não há cálculo necessário** - valores já processados
    - Separa valores de pontos (colunas 1-3) dos percentuais (colunas 4-6)
    - Converte formato brasileiro para padrão internacional
+
+**📊 Resumo das Diferenças ICF:**
+| Aspecto | Método Planilha | Método Web Scraping |
+|---------|----------------|-------------------|
+| **Planilhas necessárias** | 2 (atual + anterior) | 0 (acesso direto ao site) |
+| **Cálculo matemático** | ✅ Necessário | ❌ Não necessário |
+| **Complexidade** | Alta | Baixa |
+| **Ponto de falha** | Qualquer planilha indisponível | Instabilidade do site |
+| **Dados obtidos** | Calculados localmente | Pré-calculados pelo CNC |
 
 ### 💳 PEIC (Pesquisa de Endividamento e Inadimplência)
 
