@@ -1,7 +1,7 @@
 {
    "name": "cnc",
    "version": "0.0.1",
-   "description": "Awesome project developed with TypeORM.",
+   "description": "Sistema automatizado para coleta, processamento e armazenamento de dados das pesquisas econômicas da Confederação Nacional do Comércio (CNC) - ICEC, ICF e PEIC.",
    "type": "commonjs",
    "devDependencies": {
       "@types/node": "^22.13.10",
@@ -29,15 +29,10 @@
       "start": "ts-node ./src/index.ts",
       "dev": "ts-node-dev ./src/index.ts",
       "force": "ts-node ./src/force.ts",
-      "test-notification": "ts-node ./src/test-notification.ts",
-      "test-periodo-config": "ts-node ./src/server/tests/teste-periodo-config.ts",
       "typeorm": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts",
       "build": "tsc",
       "migration:generate": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts migration:generate ./src/server/database/migrations/default",
       "migration:run": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts migration:run",
-      "migration:revert": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts migration:revert",
-      "test:smtp": "ts-node ./src/server/tests/diagnostico-smtp.ts",
-      "test:smtp:send": "ts-node ./src/server/tests/diagnostico-smtp.ts --test-send",
-      "test:notification": "ts-node ./src/server/tests/exemplos-notificacao.ts"
+      "migration:revert": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts migration:revert"
    }
 }

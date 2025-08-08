@@ -85,6 +85,44 @@ export class NotificationService {
         };
     }
 
+    /**
+     * Processa a lista de destinatários de email
+     */
+    private processarDestinatarios(): string {
+        const emailsPadrão = 'ivan.belshoff@es.senac.br';
+        
+        // Verificar se existe a variável de ambiente
+        const notificationEmails = process.env.NOTIFICATION_EMAIL;
+        
+        if (!notificationEmails || notificationEmails.trim() === '') {
+            console.log('📧 Usando email padrão (variável NOTIFICATION_EMAIL não configurada)');
+            return emailsPadrão;
+        }
+
+        // Processar múltiplos emails separados por vírgula
+        const emails = notificationEmails
+            .split(',')
+            .map(email => email.trim())
+            .filter(email => email.length > 0 && this.validarEmail(email));
+
+        if (emails.length === 0) {
+            console.log('📧 Nenhum email válido encontrado, usando email padrão');
+            return emailsPadrão;
+        }
+
+        const emailsList = emails.join(', ');
+        console.log(`📧 Destinatários configurados: ${emailsList}`);
+        return emailsList;
+    }
+
+    /**
+     * Valida formato básico de email
+     */
+    private validarEmail(email: string): boolean {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+    }
+
     private async ensureTempDirectory(): Promise<void> {
         try {
             await fs.ensureDir(this.tempDir);
@@ -326,9 +364,12 @@ export class NotificationService {
         const iconeSubject = modoExecucao === 'Agendado' ? '⏰' : '🚀';
         const subject = `${iconeSubject} Relatório CNC ${modoExecucao} - ${new Date().toLocaleDateString('pt-BR')}`;
 
+        // Processar destinatários
+        const destinatarios = this.processarDestinatarios();
+
         const mailOptions = {
             from: process.env.MAIL_USERNAME,
-            to: process.env.NOTIFICATION_EMAIL || 'ivan.belshoff@es.senac.br',
+            to: destinatarios,
             subject: subject,
             html: corpoEmail,
             attachments: attachments

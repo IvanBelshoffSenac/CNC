@@ -151,6 +151,9 @@ REGIONS_PEIC="BR,ES"
 SCHEDULE_ICEC="0 2 1 * *"
 SCHEDULE_ICF="0 5 1 * *"
 SCHEDULE_PEIC="0 8 1 * *"
+
+# Múltiplos destinatários para notificações
+NOTIFICATION_EMAIL="destinatario1@dominio.com, destinatario2@empresa.com"
 ```
 
 > ⚠️ **Importante**: Nunca commite o arquivo `.env` com credenciais reais no repositório. Use sempre o `.env.example` como template.
@@ -338,6 +341,7 @@ SCHEDULE_ICF="0 0 10 1,15 * *"
 | `EXCHANGE_PORT` | Porta SMTP |
 | `MAIL_USERNAME` | Email remetente |
 | `MAIL_PASSWORD` | Senha do email |
+| `NOTIFICATION_EMAIL` | Email(s) destinatário(s) - suporte a múltiplos separados por vírgula |
 
 ## 📜 Scripts Disponíveis
 
@@ -350,7 +354,6 @@ SCHEDULE_ICF="0 0 10 1,15 * *"
 | `npm run migration:generate` | Gera nova migração |
 | `npm run migration:run` | Executa migrações |
 | `npm run migration:revert` | Reverte última migração |
-| `npm run test:notification` | Testa sistema de notificações |
 
 ## 📁 Estrutura do Projeto
 
@@ -672,7 +675,7 @@ npx playwright install
 
 #### 4. Emails não são enviados
 - Verifique configurações SMTP no `.env`
-- Teste com: `npm run test:notification`
+- Teste manualmente enviando um email de relatório
 
 ### Logs e Monitoramento
 
@@ -762,14 +765,56 @@ EXCHANGE_PORT=587
 MAIL_USERNAME=seu_email@dominio.com
 MAIL_PASSWORD=sua_senha
 
-# Email de destino (opcional)
-NOTIFICATION_EMAIL=destinatario@dominio.com
+# Email(s) de destino - suporte a múltiplos destinatários
+NOTIFICATION_EMAIL="destinatario@dominio.com, admin@empresa.com, relatorios@organizacao.br"
 ```
 
-### Teste do Sistema
-```bash
-npm run test:notification
+#### 📧 Configuração Especial - Múltiplos Destinatários
+
+A variável `NOTIFICATION_EMAIL` suporta **múltiplos destinatários** com funcionalidades avançadas:
+
+**Formatos Suportados:**
+```env
+# Um único destinatário
+NOTIFICATION_EMAIL="email@empresa.com"
+
+# Múltiplos destinatários (separados por vírgula)
+NOTIFICATION_EMAIL="gestor@empresa.com, ti@empresa.com, relatorios@empresa.com"
+
+# Com espaços extras (serão removidos automaticamente)
+NOTIFICATION_EMAIL="  email1@dominio.com  ,   email2@empresa.com   "
 ```
+
+**Funcionalidades Automáticas:**
+- ✅ **Processamento inteligente**: Separa emails por vírgula e remove espaços extras
+- ✅ **Validação de formato**: Verifica se cada email possui formato válido (`usuario@dominio.com`)
+- ✅ **Filtro de inválidos**: Remove automaticamente emails com formato incorreto
+- ✅ **Fallback seguro**: Se nenhum email válido for encontrado, usa email padrão configurado
+- ✅ **Logs informativos**: Exibe quais destinatários foram configurados
+
+**Exemplos de Validação:**
+```env
+# Emails válidos (serão enviados)
+✅ admin@empresa.com
+✅ admin@fecomercio-es.com.br  
+✅ user+tag@domain.com
+✅ user.name@domain-name.com
+
+# Emails inválidos (serão ignorados)
+❌ email-invalido
+❌ outro-invalido@
+❌ @dominio.com
+❌ email@
+```
+
+**Comportamento do Sistema:**
+- **Sem configuração**: Usa email padrão configurado no sistema
+- **Emails válidos encontrados**: Envia para todos os destinatários válidos
+- **Apenas emails inválidos**: Usa email padrão como fallback
+- **Logs de confirmação**: Exibe `"📧 Destinatários configurados: email1, email2, email3"`
+
+### Teste do Sistema
+Execute o sistema em modo de desenvolvimento e verifique o funcionamento dos emails através dos logs de execução.
 
 ---
 
