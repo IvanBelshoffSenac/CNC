@@ -26,7 +26,7 @@
       "xlsx": "^0.18.5"
    },
    "scripts": {
-      "start": "ts-node ./src/index.ts",
+      "start": "node ./build/index.js",
       "dev": "ts-node-dev ./src/index.ts",
       "force": "ts-node ./src/force.ts",
       "typeorm": "typeorm-ts-node-commonjs -d ./src/server/database/data-source.ts",
