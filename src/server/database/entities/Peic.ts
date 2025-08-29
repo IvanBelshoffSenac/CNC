@@ -1,5 +1,6 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn } from "typeorm";
 import { Metodo, Regiao } from "../../shared/interfaces";
+import { MetadadosPeic } from "./metadadosPeic";
 
 @Entity('peics')
 export class Peic {
@@ -35,6 +36,11 @@ export class Peic {
 
     @Column({ nullable: false, type: 'enum', enum: Metodo })
     METODO: Metodo;
+
+    @OneToMany(() => MetadadosPeic, (metadados) => metadados.peic, {
+        onDelete: "CASCADE"
+    })
+    metadados?: MetadadosPeic[]
 
     @CreateDateColumn()
     DATA_INSERCAO?: Date

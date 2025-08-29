@@ -69,6 +69,24 @@ export interface IServiceResult {
     modoExecucao?: 'Agendado' | 'Forçado';
 }
 
+export interface peicXLSXSubtipos {
+    tipo: string;
+    total: number;
+    "até 10sm - %": number;
+    "mais de 10sm - %": number;
+    "Numero Absoluto": number;
+}
+
+export interface peicXLSXTipo {
+    tipo: string;
+    valores: peicXLSXSubtipos[];
+}
+
+export interface peicXLSXCompleta {
+    peictableTipo: peicXLSXTipo[];
+}
+
+
 export interface icfXLSXSubtipos {
     tipo: string;
     indice: boolean;

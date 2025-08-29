@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { icfXLSXCompleta, icfXLSXTipo, IPeriod } from './interfaces';
+import { icfXLSXCompleta, icfXLSXTipo, IPeriod, peicXLSXCompleta, peicXLSXTipo } from './interfaces';
 
 
 /**
@@ -434,6 +434,48 @@ export function extractServicePeriodRange(periods: IPeriod[]): { periodoInicio: 
 export const roundToOneDecimal = (value: number): number => {
     return Math.round(value * 10) / 10;
 };
+
+export function transformJsonToPEIC(jsonData: any[][]): peicXLSXCompleta {
+    const result: peicXLSXTipo[] = [];
+    let currentTipo: peicXLSXTipo | null = null;
+
+    for (let i = 0; i < jsonData.length; i++) {
+        const row = jsonData[i];
+
+        // Verifica se é uma linha de cabeçalho (nova categoria)
+        // Para PEIC: TOTAL | até 10sm - % | mais de 10sm - % | Numero Absoluto
+        if (row[1] === "TOTAL" && row[2] === "até 10sm - %" && row[3].includes("mais de 10sm") && row[4] === "Numero Absoluto") {
+            // Se já existe um tipo atual, adiciona ao resultado
+            if (currentTipo) {
+                result.push(currentTipo);
+            }
+
+            // Cria novo tipo
+            currentTipo = {
+                tipo: row[0],
+                valores: []
+            };
+        } else if (currentTipo && row[0]) {
+            // Adiciona o valor
+            currentTipo.valores.push({
+                tipo: row[0],
+                total: parseFloat(row[1]?.toString() || '0'),
+                "até 10sm - %": parseFloat(row[2]?.toString() || '0'),
+                "mais de 10sm - %": parseFloat(row[3]?.toString() || '0'),
+                "Numero Absoluto": parseFloat(row[4]?.toString() || '0')
+            });
+        }
+    }
+
+    // Adiciona o último tipo se existir
+    if (currentTipo) {
+        result.push(currentTipo);
+    }
+
+    return {
+        peictableTipo: result
+    };
+}
 
 export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
     const result: icfXLSXTipo[] = [];

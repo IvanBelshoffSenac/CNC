@@ -753,12 +753,7 @@ export class IcfService {
                     const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
 
                     const icfData: Icf = {
-                        NC_PONTOS: completeData.NC_PONTOS,
-                        ATE_10_SM_PONTOS: completeData.ATE_10_SM_PONTOS,
-                        MAIS_DE_10_SM_PONTOS: completeData.MAIS_DE_10_SM_PONTOS,
-                        NC_PERCENTUAL: completeData.NC_PERCENTUAL,
-                        ATE_10_SM_PERCENTUAL: completeData.ATE_10_SM_PERCENTUAL,
-                        MAIS_DE_10_SM_PERCENTUAL: completeData.MAIS_DE_10_SM_PERCENTUAL,
+                        ...completeData,
                         MES: period.mes,
                         ANO: period.ano,
                         REGIAO: regiao as Regiao,
@@ -768,7 +763,7 @@ export class IcfService {
                     // Acumular dados em vez de salvar imediatamente
                     icfDataList.push(icfData);
 
-                    console.log(`✅ Período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} processado com sucesso`);
+                    console.log(LogMessages.sucesso('ICF', regiao, period.mes, period.ano));
 
                     tasks.push({
                         mes: period.mes,
@@ -782,7 +777,7 @@ export class IcfService {
                     registrosPlanilha++;
 
                 } catch (error) {
-                    console.log(`✗ Erro no período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${error}`);
+                    console.log(LogMessages.erro('ICF', regiao, period.mes, period.ano, error));
 
                     tasks.push({
                         mes: period.mes,

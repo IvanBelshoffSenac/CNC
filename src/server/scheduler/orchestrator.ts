@@ -145,6 +145,7 @@ export class TaskOrchestrator {
 
         try {
 
+            /*
             const icfResult = await this.runIcfWithMonitoring();
             icfResult.modoExecucao = 'Forçado';
             resultados.push(icfResult);
@@ -152,7 +153,8 @@ export class TaskOrchestrator {
             const icecResult = await this.runIcecWithMonitoring();
             icecResult.modoExecucao = 'Forçado';
             resultados.push(icecResult);
-
+            */
+           
             const peicResult = await this.runPeicWithMonitoring();
             peicResult.modoExecucao = 'Forçado';
             resultados.push(peicResult);
