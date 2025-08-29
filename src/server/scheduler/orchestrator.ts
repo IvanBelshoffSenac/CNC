@@ -112,7 +112,7 @@ export class TaskOrchestrator {
 
         } catch (error) {
             console.error('❌ Erro durante o processamento completo:', error);
-            
+
             // Mesmo com erro, tentar enviar relatório parcial
             if (resultados.length > 0) {
                 try {
@@ -144,19 +144,22 @@ export class TaskOrchestrator {
         const resultados: IServiceResult[] = [];
 
         try {
-            // Executar com monitoramento
-            const icecResult = await this.runIcecWithMonitoring();
-            icecResult.modoExecucao = 'Forçado';
-            resultados.push(icecResult);
 
             const icfResult = await this.runIcfWithMonitoring();
             icfResult.modoExecucao = 'Forçado';
             resultados.push(icfResult);
 
+            /*
+            // Executar com monitoramento
+            const icecResult = await this.runIcecWithMonitoring();
+            icecResult.modoExecucao = 'Forçado';
+            resultados.push(icecResult);
+
+
             const peicResult = await this.runPeicWithMonitoring();
             peicResult.modoExecucao = 'Forçado';
             resultados.push(peicResult);
-
+*/
             const endTime = Date.now();
             const duration = Math.round((endTime - startTime) / 1000 / 60);
 
@@ -170,7 +173,7 @@ export class TaskOrchestrator {
 
         } catch (error) {
             console.error('❌ Erro durante o processamento forçado:', error);
-            
+
             // Mesmo com erro, tentar enviar relatório parcial
             if (resultados.length > 0) {
                 try {
@@ -277,7 +280,7 @@ export class TaskOrchestrator {
             isRunning: this.isRunning,
             nextExecutions: [
                 `ICEC: ${scheduleIcec}`,
-                `ICF: ${scheduleIcf}`, 
+                `ICF: ${scheduleIcf}`,
                 `PEIC: ${schedulePeic}`
             ]
         };

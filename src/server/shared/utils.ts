@@ -36,11 +36,11 @@ export function generatePeriods(isPeic: boolean = false): IPeriod[] {
  */
 export function formatPeriod(date?: Date, subtractMonth: boolean = false): string {
     const currentDate = date || new Date();
-    
+
     if (subtractMonth) {
         currentDate.setMonth(currentDate.getMonth() - 1);
     }
-    
+
     return format(currentDate, 'MM/yyyy');
 }
 
@@ -117,18 +117,18 @@ export async function cleanupTempFiles(filePaths: string[]): Promise<void> {
 export async function cleanupServiceTempFolder(serviceName: string, tempDir: string): Promise<void> {
     try {
         console.log(`🧹 Iniciando limpeza da pasta temp para ${serviceName.toUpperCase()}...`);
-        
+
         if (!await fs.pathExists(tempDir)) {
             console.log(`📁 Pasta temp não existe: ${tempDir}`);
             return;
         }
 
         const files = await fs.readdir(tempDir);
-        
+
         // Filtrar apenas arquivos do serviço específico
         const servicePattern = new RegExp(`^${serviceName.toLowerCase()}_`, 'i');
-        const serviceFiles = files.filter(file => 
-            servicePattern.test(file) && 
+        const serviceFiles = files.filter(file =>
+            servicePattern.test(file) &&
             (file.endsWith('.xls') || file.endsWith('.xlsx'))
         );
 
@@ -138,7 +138,7 @@ export async function cleanupServiceTempFolder(serviceName: string, tempDir: str
         }
 
         console.log(`📄 Encontrados ${serviceFiles.length} arquivo(s) temporário(s) do ${serviceName.toUpperCase()}`);
-        
+
         let removedCount = 0;
         for (const file of serviceFiles) {
             try {
@@ -152,7 +152,7 @@ export async function cleanupServiceTempFolder(serviceName: string, tempDir: str
         }
 
         console.log(`✅ Limpeza concluída: ${removedCount}/${serviceFiles.length} arquivo(s) removido(s)`);
-        
+
     } catch (error) {
         console.error(`❌ Erro durante limpeza da pasta temp para ${serviceName.toUpperCase()}:`, error);
     }
@@ -175,25 +175,25 @@ export function getPreviousPeriod(mes: number, ano: number): IPeriod {
  * Cria mensagens de log padronizadas
  */
 export const LogMessages = {
-    processando: (servico: string, regiao: string, mes: number, ano: number) => 
+    processando: (servico: string, regiao: string, mes: number, ano: number) =>
         `Processando período: ${formatPeriodDisplay(regiao, mes, ano)}`,
-    
-    sucesso: (servico: string, regiao: string, mes: number, ano: number) => 
+
+    sucesso: (servico: string, regiao: string, mes: number, ano: number) =>
         `✅ Período ${formatPeriodDisplay(regiao, mes, ano)} processado com sucesso`,
-    
-    erro: (servico: string, regiao: string, mes: number, ano: number, error: any) => 
+
+    erro: (servico: string, regiao: string, mes: number, ano: number, error: any) =>
         `✗ Erro no período ${formatPeriodDisplay(regiao, mes, ano)}: ${error}`,
-    
-    webScrapingInicio: (servico: string, regiao: string, mes: number, ano: number) => 
+
+    webScrapingInicio: (servico: string, regiao: string, mes: number, ano: number) =>
         `🌐 Tentando web scraping para ${servico} ${formatPeriodDisplay(regiao, mes, ano)}`,
-    
-    webScrapingSucesso: (servico: string, regiao: string, mes: number, ano: number) => 
+
+    webScrapingSucesso: (servico: string, regiao: string, mes: number, ano: number) =>
         `✅ Web scraping bem-sucedido: ${servico} ${formatPeriodDisplay(regiao, mes, ano)}`,
-    
-    webScrapingFalha: (servico: string, regiao: string, mes: number, ano: number, error: any) => 
+
+    webScrapingFalha: (servico: string, regiao: string, mes: number, ano: number, error: any) =>
         `❌ Falha no web scraping: ${servico} ${formatPeriodDisplay(regiao, mes, ano)} - ${error}`,
-    
-    teste: (servico: string, regiao: string, mes: number, ano: number) => 
+
+    teste: (servico: string, regiao: string, mes: number, ano: number) =>
         `📊 Testando ${servico} ${formatPeriodDisplay(regiao, mes, ano)}`
 };
 
@@ -212,7 +212,7 @@ export interface IPeriodConfig {
  * @returns Configuração de período parseada
  */
 export function parsePeriodConfig(
-    periodValue?: string, 
+    periodValue?: string,
     defaultStart: string = '01/2010'
 ): IPeriodConfig {
     // Se não foi fornecido valor, usar padrão
@@ -232,7 +232,7 @@ export function parsePeriodConfig(
  */
 function parsePeriodString(periodString: string): IPeriodConfig {
     const parts = periodString.split(':');
-    
+
     if (parts.length !== 2) {
         throw new Error(`Formato de período inválido: ${periodString}. Use formato MM/YYYY:ENDTYPE`);
     }
@@ -286,7 +286,7 @@ function parseEndDate(endStr: string): { mes: number; ano: number } {
         const monthsBack = parseInt(monthsBackMatch[1], 10);
         const currentDate = new Date();
         currentDate.setMonth(currentDate.getMonth() - monthsBack);
-        
+
         return {
             mes: currentDate.getMonth() + 1,
             ano: currentDate.getFullYear()
@@ -323,7 +323,7 @@ export function generatePeriodsFromConfig(periodConfig: IPeriodConfig): IPeriod[
     const { startDate, endDate } = periodConfig;
 
     // Validar se data inicial não é posterior à final
-    if (startDate.ano > endDate.ano || 
+    if (startDate.ano > endDate.ano ||
         (startDate.ano === endDate.ano && startDate.mes > endDate.mes)) {
         throw new Error(`Data inicial (${formatMonth(startDate.mes)}/${startDate.ano}) não pode ser posterior à data final (${formatMonth(endDate.mes)}/${endDate.ano})`);
     }
@@ -349,7 +349,7 @@ export function generatePeriodsFromConfig(periodConfig: IPeriodConfig): IPeriod[
 export function getServicePeriodConfig(service: 'ICF' | 'ICEC' | 'PEIC'): IPeriodConfig {
     const envKey = `PERIOD_${service}`;
     const periodValue = process.env[envKey];
-    
+
     try {
         return parsePeriodConfig(periodValue);
     } catch (error) {
@@ -377,29 +377,29 @@ export function generateServicePeriods(service: 'ICF' | 'ICEC' | 'PEIC'): IPerio
 export function getServiceRegions(service: 'ICF' | 'ICEC' | 'PEIC'): string[] {
     const envKey = `REGIONS_${service}`;
     const regionsValue = process.env[envKey];
-    
+
     // Se não está configurado ou está vazio, retorna região padrão
     if (!regionsValue || regionsValue.trim() === '') {
         console.log(`⚠️ ${envKey} não configurado. Usando região padrão: BR`);
         return ['BR'];
     }
-    
+
     try {
         // Split pela vírgula e remove espaços em branco
         const regions = regionsValue
             .split(',')
             .map(region => region.trim().toUpperCase())
             .filter(region => region.length > 0); // Remove strings vazias
-        
+
         // Se após o processamento não sobrou nenhuma região válida, usar padrão
         if (regions.length === 0) {
             console.log(`⚠️ ${envKey} configurado mas sem regiões válidas. Usando região padrão: BR`);
             return ['BR'];
         }
-        
+
         console.log(`✅ Regiões configuradas para ${service}: ${regions.join(', ')}`);
         return regions;
-        
+
     } catch (error) {
         console.warn(`⚠️ Erro ao processar ${envKey}: ${error}. Usando região padrão: BR`);
         return ['BR'];
@@ -430,3 +430,7 @@ export function extractServicePeriodRange(periods: IPeriod[]): { periodoInicio: 
         periodoFim: `${ultimo.mes.toString().padStart(2, '0')}/${ultimo.ano}`
     };
 }
+
+export const roundToOneDecimal = (value: number): number => {
+    return Math.round(value * 10) / 10;
+};

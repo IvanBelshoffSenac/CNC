@@ -1,4 +1,5 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn } from "typeorm";
+import { MetadadosIcf } from "./MetadadosIcf";
 import { Metodo, Regiao } from "../../shared/interfaces";
 
 
@@ -36,6 +37,11 @@ export class Icf {
 
     @Column({ nullable: false, type: 'enum', enum: Metodo })
     METODO: Metodo;
+
+    @OneToMany(() => MetadadosIcf, (metadados) => metadados.icf, {
+        onDelete: "SET NULL"
+    })
+    metadados?: MetadadosIcf[]
 
     @CreateDateColumn()
     DATA_INSERCAO?: Date
