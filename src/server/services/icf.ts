@@ -13,8 +13,8 @@ import {
     calculateTaskStats,
     cleanupServiceTempFolder,
     LogMessages,
-    cleanupTempFiles,
-    roundToOneDecimal
+    roundToOneDecimal,
+    transformJsonToICF
 } from '../shared/utils';
 import { In } from 'typeorm';
 
@@ -109,69 +109,28 @@ export class IcfService {
             const worksheet = workbook.Sheets[sheetName];
             const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
 
+            // Usar a função otimizada para extrair dados estruturados
+            const icfCompleta = transformJsonToICF(jsonData);
+
+            // Converter para o formato MetadadosIcf
             const metadados: MetadadosIcf[] = [];
 
-            // Mapear os tipos de índice e seus campos correspondentes
-            const tiposIndice = [
-                { tipo: 'Emprego Atual', campos: ['Mais seguro', 'Menos seguro', 'Igual ao ano passado', 'Estou desempregado', 'Não sabe / Não respondeu', 'Índice'] },
-                { tipo: 'Perspectiva Profissional', campos: ['Sim (Positiva)', 'Não (Negativa)', 'Não sabe', 'Não respondeu', 'Índice'] },
-                { tipo: 'Renda Atual', campos: ['Melhor', 'Pior', 'Igual a do ano passado', 'Não sabe / não respondeu', 'Índice'] },
-                { tipo: 'Compra a Prazo (Acesso ao crédito)', campos: ['Mais Fácil', 'Mais Difícil', 'Igual ao ano passado', 'Não sabe / não respondeu', 'Índice'] },
-                { tipo: 'Nível de Consumo Atual', campos: ['Estamos comprando mais (Maior)', 'Estamos comprando menos (Menor)', 'Estamos comprando a mesma coisa (Igual)', 'Não sabe / Não respondeu', 'Índice'] },
-                { tipo: 'Perspectiva de Consumo', campos: ['Maior que o segundo semestre do ano passado (Maior)', 'Menor que o segundo semestre do ano passado (Menor)', 'Igual ao segundo semestre do ano passado (Igual)', 'Não sabe / Não respondeu', 'Índice'] },
-                { tipo: 'Momento para Duráveis', campos: ['Bom', 'Mau', 'Não Sabe', 'Não Respondeu', 'Índice'] },
-                { tipo: 'ICF (Variação Mensal)', campos: ['Emprego Atual', 'Perspectiva Profissional', 'Renda Atual', 'Compra a Prazo (Acesso ao crédito)', 'Nível de Consumo Atual', 'Perspectiva de Consumo', 'Momento para Duráveis', 'Índice (Variação Mensal)'] },
-                { tipo: 'Índice (Em Pontos)', campos: ['Índice (Em Pontos)'] }
-            ];
+            for (const tipo of icfCompleta.icftableTipo) {
+                for (const valor of tipo.valores) {
+                    const metadado = new MetadadosIcf();
+                    metadado.tipoIndice = tipo.tipo;
+                    metadado.campo = valor.tipo;
+                    metadado.TOTAL = this.parseExcelValueToNumber(valor.total);
+                    metadado.ATE_10_SM = this.parseExcelValueToNumber(valor["até 10sm - %"]);
+                    metadado.MAIS_DE_10_SM = this.parseExcelValueToNumber(valor["mais de 10sm - %"]);
+                    metadado.indice = valor.indice;
 
-            for (const tipoInfo of tiposIndice) {
-                let currentRowIndex = -1;
-
-                // Encontrar a linha do cabeçalho do tipo
-                for (let i = 0; i < jsonData.length; i++) {
-                    const row = jsonData[i];
-                    if (row && row[0] && String(row[0]).trim() === tipoInfo.tipo) {
-                        currentRowIndex = i;
-                        break;
-                    }
-                }
-
-                if (currentRowIndex !== -1) {
-                    // Processar cada campo deste tipo
-                    for (const campo of tipoInfo.campos) {
-                        for (let i = currentRowIndex + 1; i < jsonData.length; i++) {
-                            const row = jsonData[i];
-                            if (row && row[0]) {
-                                const cellValue = String(row[0]).trim();
-
-                                // Parar se chegou ao próximo tipo de índice
-                                const isNextType = tiposIndice.some(tipo =>
-                                    tipo.tipo !== tipoInfo.tipo && tipo.tipo === cellValue
-                                );
-                                if (isNextType) break;
-
-                                // Verificar se a linha corresponde ao campo procurado
-                                if (cellValue === campo ||
-                                    (campo === 'Índice (Em Pontos)' && cellValue.includes('Índice (Em Pontos)'))) {
-
-                                    const metadado = new MetadadosIcf();
-                                    metadado.tipoIndice = tipoInfo.tipo;
-                                    metadado.campo = campo;
-                                    metadado.TOTAL = this.parseExcelValueToNumber(row[1]);
-                                    metadado.ATE_10_SM = this.parseExcelValueToNumber(row[2]);
-                                    metadado.MAIS_DE_10_SM = this.parseExcelValueToNumber(row[3]);
-                                    metadado.indice = (campo === 'Índice' || campo === 'Índice (Variação Mensal)' || campo === 'Índice (Em Pontos)') ? true : false;
-
-                                    metadados.push(metadado);
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                    metadados.push(metadado);
                 }
             }
 
             return metadados;
+
         } catch (error) {
             throw new Error(`Erro ao extrair metadados da planilha ICF: ${error}`);
         }
@@ -275,6 +234,8 @@ export class IcfService {
 
                     // Extrair metadados da planilha existente
                     const metadados = await this.extractMetadataFromExcel(filePath);
+
+                    console.log(metadados)
 
                     if (metadados.length > 0) {
                         // Encontrar o registro ICF correspondente para a região e período específicos
@@ -733,9 +694,25 @@ export class IcfService {
     /** Limpa a base de dados ICF */
     private async cleanDatabase(): Promise<string> {
         try {
-            await icfRepository.clear();
+            const logMessages: string[] = [];
 
-            return '✅ Base de dados ICF limpa com sucesso\n';
+            // Limpar metadados primeiro (respeitando foreign key constraint)
+            console.log('🧹 Limpando metadados ICF...');
+            await metadadosIcfRepository.createQueryBuilder()
+                .delete()
+                .from(MetadadosIcf)
+                .execute();
+            logMessages.push('✅ Metadados ICF limpos com sucesso');
+
+            // Limpar registros ICF
+            console.log('🧹 Limpando registros ICF...');
+            await icfRepository.createQueryBuilder()
+                .delete()
+                .from(Icf)
+                .execute();
+            logMessages.push('✅ Registros ICF limpos com sucesso');
+
+            return logMessages.join('\n') + '\n';
 
         } catch (error) {
             return `Erro ao limpar a base de dados ICF: ${error}\n`;

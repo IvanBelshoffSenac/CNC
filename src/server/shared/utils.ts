@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { IPeriod } from './interfaces';
+import { icfXLSXCompleta, icfXLSXTipo, IPeriod } from './interfaces';
 
 
 /**
@@ -434,3 +434,48 @@ export function extractServicePeriodRange(periods: IPeriod[]): { periodoInicio: 
 export const roundToOneDecimal = (value: number): number => {
     return Math.round(value * 10) / 10;
 };
+
+export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
+    const result: icfXLSXTipo[] = [];
+    let currentTipo: icfXLSXTipo | null = null;
+
+    for (let i = 0; i < jsonData.length; i++) {
+        const row = jsonData[i];
+
+        // Verifica se é uma linha de cabeçalho (nova categoria)
+        if (row[1] === "TOTAL" && row[2] === "até 10sm - %" && row[3].includes("mais de 10sm")) {
+            // Se já existe um tipo atual, adiciona ao resultado
+            if (currentTipo) {
+                result.push(currentTipo);
+            }
+
+            // Cria novo tipo
+            currentTipo = {
+                tipo: row[0],
+                valores: []
+            };
+        } else if (currentTipo && row[0]) {
+            // Verifica se é um índice verdadeiro (exclui "Índice (Variação Mensal)")
+            const isIndice = (row[0] === "Índice" || row[0] === "Índice (Em Pontos)") &&
+                row[0] !== "Índice (Variação Mensal)";
+
+            // Adiciona o valor (seja índice ou não)
+            currentTipo.valores.push({
+                tipo: row[0],
+                indice: isIndice,
+                total: parseFloat(row[1].toString()),
+                "até 10sm - %": parseFloat(row[2].toString()),
+                "mais de 10sm - %": parseFloat(row[3].toString())
+            });
+        }
+    }
+
+    // Adiciona o último tipo se existir
+    if (currentTipo) {
+        result.push(currentTipo);
+    }
+
+    return {
+        icftableTipo: result
+    };
+}

@@ -68,3 +68,20 @@ export interface IServiceResult {
     falhas: number;
     modoExecucao?: 'Agendado' | 'Forçado';
 }
+
+export interface icfXLSXSubtipos {
+    tipo: string;
+    indice: boolean;
+    total: number;
+    "até 10sm - %": number;
+    "mais de 10sm - %": number;
+}
+
+export interface icfXLSXTipo {
+    tipo: string;
+    valores: icfXLSXSubtipos[];
+}
+
+export interface icfXLSXCompleta {
+    icftableTipo: icfXLSXTipo[];
+}

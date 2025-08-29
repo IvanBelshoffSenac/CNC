@@ -149,17 +149,14 @@ export class TaskOrchestrator {
             icfResult.modoExecucao = 'Forçado';
             resultados.push(icfResult);
 
-            /*
-            // Executar com monitoramento
             const icecResult = await this.runIcecWithMonitoring();
             icecResult.modoExecucao = 'Forçado';
             resultados.push(icecResult);
 
-
             const peicResult = await this.runPeicWithMonitoring();
             peicResult.modoExecucao = 'Forçado';
             resultados.push(peicResult);
-*/
+
             const endTime = Date.now();
             const duration = Math.round((endTime - startTime) / 1000 / 60);
 

@@ -39,7 +39,7 @@ export class Icf {
     METODO: Metodo;
 
     @OneToMany(() => MetadadosIcf, (metadados) => metadados.icf, {
-        onDelete: "SET NULL"
+        onDelete: "CASCADE"
     })
     metadados?: MetadadosIcf[]
 
