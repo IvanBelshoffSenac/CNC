@@ -2,6 +2,7 @@ import { format } from 'date-fns';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { icfXLSXCompleta, icfXLSXTipo, IPeriod, peicXLSXCompleta, peicXLSXTipo } from './interfaces';
+import { metadadosIcfRepository } from '../database/repositories';
 
 
 /**
@@ -436,15 +437,27 @@ export const roundToOneDecimal = (value: number): number => {
 };
 
 export function transformJsonToPEIC(jsonData: any[][]): peicXLSXCompleta {
+
     const result: peicXLSXTipo[] = [];
     let currentTipo: peicXLSXTipo | null = null;
 
     for (let i = 0; i < jsonData.length; i++) {
         const row = jsonData[i];
 
+        // Ignorar linhas vazias ou com apenas nulls
+        if (!row || row.every(cell => cell === null || cell === undefined)) {
+            continue;
+        }
+
         // Verifica se é uma linha de cabeçalho (nova categoria)
-        // Para PEIC: TOTAL | até 10sm - % | mais de 10sm - % | Numero Absoluto
-        if (row[1] === "TOTAL" && row[2] === "até 10sm - %" && row[3].includes("mais de 10sm") && row[4] === "Numero Absoluto") {
+        // Para PEIC normal: "total - %" | "até 10sm - %" | "mais de 10sm - %"
+        // Para PEIC (Sintese): "Numero Absoluto" | null | null
+        const isNormalHeader = row[1] === "total - %" && row[2] === "até 10sm - %" && 
+                              row[3] && row[3].includes("mais de 10sm");
+        
+        const isSinteseHeader = row[1] === "Numero Absoluto" && row[2] === null && row[3] === null;
+
+        if (isNormalHeader || isSinteseHeader) {
             // Se já existe um tipo atual, adiciona ao resultado
             if (currentTipo) {
                 result.push(currentTipo);
@@ -455,15 +468,29 @@ export function transformJsonToPEIC(jsonData: any[][]): peicXLSXCompleta {
                 tipo: row[0],
                 valores: []
             };
-        } else if (currentTipo && row[0]) {
-            // Adiciona o valor
-            currentTipo.valores.push({
-                tipo: row[0],
-                total: parseFloat(row[1]?.toString() || '0'),
-                "até 10sm - %": parseFloat(row[2]?.toString() || '0'),
-                "mais de 10sm - %": parseFloat(row[3]?.toString() || '0'),
-                "Numero Absoluto": parseFloat(row[4]?.toString() || '0')
-            });
+        } else if (currentTipo && row[0] && typeof row[0] === 'string' && row[0].trim() !== '') {
+            // Verifica se é PEIC (Sintese) para tratar de forma diferente
+            const isSintese = currentTipo.tipo === "PEIC (Sintese)";
+
+            if (isSintese) {
+                // Para PEIC (Sintese): apenas "Numero Absoluto" tem valor, resto é 0
+                currentTipo.valores.push({
+                    tipo: row[0],
+                    total: "0",
+                    "até 10sm - %": "0",
+                    "mais de 10sm - %": "0",
+                    "Numero Absoluto": row[1]
+                });
+            } else {
+                // Para outros tipos: valores percentuais normais, "Numero Absoluto" é 0
+                currentTipo.valores.push({
+                    tipo: row[0],
+                    total: row[1],
+                    "até 10sm - %": row[2],
+                    "mais de 10sm - %": row[3],
+                    "Numero Absoluto": "0"
+                });
+            }
         }
     }
 
@@ -505,9 +532,9 @@ export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
             currentTipo.valores.push({
                 tipo: row[0],
                 indice: isIndice,
-                total: parseFloat(row[1].toString()),
-                "até 10sm - %": parseFloat(row[2].toString()),
-                "mais de 10sm - %": parseFloat(row[3].toString())
+                total: row[1],
+                "até 10sm - %": row[2],
+                "mais de 10sm - %": row[3]
             });
         }
     }

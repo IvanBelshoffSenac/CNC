@@ -1,8 +1,8 @@
 import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
-import { Peic } from "./Peic";
+import { Icec } from "./Icec";
 
-@Entity('metadados_peic')
-export class MetadadosPeic {
+@Entity('metadados_icec')
+export class MetadadosIcec {
     @PrimaryGeneratedColumn("uuid")
     id?: string
 
@@ -16,17 +16,26 @@ export class MetadadosPeic {
     TOTAL: string
 
     @Column({ type: 'text', nullable: false })
-    ATE_10_SM: string
+    EMPRESAS_COM_ATÉ_50_EMPREGADOS: string
 
     @Column({ type: 'text', nullable: false })
-    MAIS_DE_10_SM: string
+    EMPRESAS_COM_MAIS_DE_50_EMPREGADOS: string
 
     @Column({ type: 'text', nullable: false })
-    NUMERO_ABSOLUTO: string;
+    SEMIDURAVEIS: string
 
-    @ManyToOne(() => Peic, (peic) => peic.metadados, { nullable: false })
-    @JoinColumn({ name: 'peic_id' })
-    peic: Peic;
+    @Column({ type: 'text', nullable: false })
+    NAO_DURAVEIS: string
+
+    @Column({ type: 'text', nullable: false })
+    DURAVEIS: string
+
+    @Column({ type: 'boolean', nullable: false })
+    INDICE: boolean
+
+    @ManyToOne(() => Icec, (icec) => icec.metadados, { nullable: false })
+    @JoinColumn({ name: 'icec_id' })
+    icec: Icec
 
     @CreateDateColumn()
     DATA_INSERCAO?: Date

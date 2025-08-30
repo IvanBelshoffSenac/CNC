@@ -1,28 +1,29 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn } from "typeorm";
 import { Metodo, Regiao } from "../../shared/interfaces";
+import { MetadadosIcec } from "./MetadadosIcec";
 
 @Entity('icecs')
 export class Icec {
     @PrimaryGeneratedColumn("uuid")
     id?: string
 
-    @Column({ type: 'float', nullable: false })
-    ICEC: number
+    @Column({ type: 'text', nullable: false })
+    ICEC: string
 
-    @Column({ type: 'float', nullable: false })
-    ATÉ_50: number
+    @Column({ type: 'text', nullable: false })
+    ATÉ_50: string
 
-    @Column({ type: 'float', nullable: false })
-    MAIS_DE_50: number
+    @Column({ type: 'text', nullable: false })
+    MAIS_DE_50: string
 
-    @Column({ type: 'float', nullable: false })
-    SEMIDURAVEIS: number
+    @Column({ type: 'text', nullable: false })
+    SEMIDURAVEIS: string
 
-    @Column({ type: 'float', nullable: false })
-    NAO_DURAVEIS: number
+    @Column({ type: 'text', nullable: false })
+    NAO_DURAVEIS: string
 
-    @Column({ type: 'float', nullable: false })
-    DURAVEIS: number
+    @Column({ type: 'text', nullable: false })
+    DURAVEIS: string
 
     @Column({ type: 'int', nullable: false })
     MES: number
@@ -35,6 +36,11 @@ export class Icec {
 
     @Column({ nullable: false, type: 'enum', enum: Metodo })
     METODO: Metodo;
+
+    @OneToMany(() => MetadadosIcec, (metadados) => metadados.icec, {
+        onDelete: "CASCADE"
+    })
+    metadados?: MetadadosIcec[]
 
     @CreateDateColumn()
     DATA_INSERCAO?: Date

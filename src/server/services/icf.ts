@@ -13,18 +13,17 @@ import {
     calculateTaskStats,
     cleanupServiceTempFolder,
     LogMessages,
-    roundToOneDecimal,
     transformJsonToICF
 } from '../shared/utils';
 import { In } from 'typeorm';
 
 interface IcfCompleteData {
-    NC_PONTOS: number;
-    ATE_10_SM_PONTOS: number;
-    MAIS_DE_10_SM_PONTOS: number;
-    NC_PERCENTUAL: number;
-    ATE_10_SM_PERCENTUAL: number;
-    MAIS_DE_10_SM_PERCENTUAL: number;
+    NC_PONTOS: string;
+    ATE_10_SM_PONTOS: string;
+    MAIS_DE_10_SM_PONTOS: string;
+    NC_PERCENTUAL: string;
+    ATE_10_SM_PERCENTUAL: string;
+    MAIS_DE_10_SM_PERCENTUAL: string;
 }
 
 export class IcfService {
@@ -87,16 +86,11 @@ export class IcfService {
     }
 
     /**
-     * Converte valor do Excel para number
+     * Converte valor do Excel para string preservando o valor original
      */
-    private parseExcelValueToNumber(value: any): number {
-        if (value === null || value === undefined) return 0;
-        if (typeof value === 'number') return roundToOneDecimal(value);
-
-        // Se for string, limpar e converter
-        const cleanValue = String(value).replace(',', '.');
-        const num = parseFloat(cleanValue);
-        return isNaN(num) ? 0 : roundToOneDecimal(num);
+    private parseValueToString(value: any): string {
+        if (value === null || value === undefined) return '';
+        return String(value);
     }
 
     /**
@@ -112,18 +106,22 @@ export class IcfService {
             // Usar a função otimizada para extrair dados estruturados
             const icfCompleta = transformJsonToICF(jsonData);
 
+            console.log(icfCompleta);
+
             // Converter para o formato MetadadosIcf
             const metadados: MetadadosIcf[] = [];
 
             for (const tipo of icfCompleta.icftableTipo) {
                 for (const valor of tipo.valores) {
                     const metadado = new MetadadosIcf();
-                    metadado.tipoIndice = tipo.tipo;
-                    metadado.campo = valor.tipo;
-                    metadado.TOTAL = this.parseExcelValueToNumber(valor.total);
-                    metadado.ATE_10_SM = this.parseExcelValueToNumber(valor["até 10sm - %"]);
-                    metadado.MAIS_DE_10_SM = this.parseExcelValueToNumber(valor["mais de 10sm - %"]);
-                    metadado.indice = valor.indice;
+                    metadado.TIPOINDICE = tipo.tipo;
+                    metadado.CAMPO = valor.tipo;
+
+                    // Salvar dados brutos como string
+                    metadado.TOTAL = this.parseValueToString(valor.total);
+                    metadado.ATE_10_SM = this.parseValueToString(valor["até 10sm - %"]);
+                    metadado.MAIS_DE_10_SM = this.parseValueToString(valor["mais de 10sm - %"]);
+                    metadado.INDICE = valor.indice;
 
                     metadados.push(metadado);
                 }
@@ -235,8 +233,6 @@ export class IcfService {
                     // Extrair metadados da planilha existente
                     const metadados = await this.extractMetadataFromExcel(filePath);
 
-                    console.log(metadados)
-
                     if (metadados.length > 0) {
                         // Encontrar o registro ICF correspondente para a região e período específicos
                         const icfRecord = registrosPlanilha.find(r =>
@@ -339,22 +335,16 @@ export class IcfService {
             throw new Error(`Dados ICF completos insuficientes. Esperado: 6 valores (3 pontos + 3 percentuais), Encontrado: ${values.length}`);
         }
 
-        // Parsear valores numéricos do ICF (formato brasileiro com vírgula)
-        const parseIcfValue = (value: string): number => {
-            const cleanValue = String(value).replace(',', '.');
-            const num = parseFloat(cleanValue);
-            return isNaN(num) ? 0 : num;
-        };
-
+        // Parsear valores como string preservando o valor original
         return {
-            // Primeiros 3 valores são os pontos
-            NC_PONTOS: parseIcfValue(values[0]),              // NC (pontos)
-            ATE_10_SM_PONTOS: parseIcfValue(values[1]),       // Até 10 SM (pontos)
-            MAIS_DE_10_SM_PONTOS: parseIcfValue(values[2]),   // Mais de 10 SM (pontos)
-            // Próximos 3 valores são os percentuais
-            NC_PERCENTUAL: parseIcfValue(values[3]),          // NC (percentual)
-            ATE_10_SM_PERCENTUAL: parseIcfValue(values[4]),   // Até 10 SM (percentual)
-            MAIS_DE_10_SM_PERCENTUAL: parseIcfValue(values[5]) // Mais de 10 SM (percentual)
+            // Primeiros 3 valores são os pontos - mantendo como string
+            NC_PONTOS: String(values[0] || ''),              // NC (pontos)
+            ATE_10_SM_PONTOS: String(values[1] || ''),       // Até 10 SM (pontos)
+            MAIS_DE_10_SM_PONTOS: String(values[2] || ''),   // Mais de 10 SM (pontos)
+            // Próximos 3 valores são os percentuais - mantendo como string
+            NC_PERCENTUAL: String(values[3] || ''),          // NC (percentual)
+            ATE_10_SM_PERCENTUAL: String(values[4] || ''),   // Até 10 SM (percentual)
+            MAIS_DE_10_SM_PERCENTUAL: String(values[5] || '') // Mais de 10 SM (percentual)
         };
     }
 
@@ -633,17 +623,11 @@ export class IcfService {
                 throw new Error('Linha "Índice (Variação Mensal)" não encontrada na planilha ICF');
             }
 
-            // Extrair os pontos (colunas 1, 2, 3)
-            const pontosData = pontosRow.slice(1, 4).map(val => {
-                const num = parseFloat(String(val || '0').replace(',', '.'));
-                return isNaN(num) ? 0 : roundToOneDecimal(num);
-            });
+            // Extrair os pontos (colunas 1, 2, 3) - mantendo como string
+            const pontosData = pontosRow.slice(1, 4).map(val => String(val || ''));
 
-            // Extrair os percentuais (colunas 1, 2, 3)
-            const percentuaisData = percentuaisRow.slice(1, 4).map(val => {
-                const num = parseFloat(String(val || '0').replace(',', '.'));
-                return isNaN(num) ? 0 : roundToOneDecimal(num);
-            });
+            // Extrair os percentuais (colunas 1, 2, 3) - mantendo como string
+            const percentuaisData = percentuaisRow.slice(1, 4).map(val => String(val || ''));
 
             return {
                 NC_PONTOS: pontosData[0],
@@ -768,7 +752,7 @@ export class IcfService {
                     tasks.push({
                         mes: period.mes,
                         ano: period.ano,
-                        regiao,
+                        regiao: regiao,
                         status: 'Sucesso',
                         servico: 'ICF',
                         metodo: Metodo.PLA

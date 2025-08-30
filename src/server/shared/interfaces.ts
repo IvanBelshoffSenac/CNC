@@ -71,10 +71,10 @@ export interface IServiceResult {
 
 export interface peicXLSXSubtipos {
     tipo: string;
-    total: number;
-    "até 10sm - %": number;
-    "mais de 10sm - %": number;
-    "Numero Absoluto": number;
+    "Numero Absoluto": string;
+    total: string;
+    "até 10sm - %": string;
+    "mais de 10sm - %": string;
 }
 
 export interface peicXLSXTipo {
@@ -86,13 +86,12 @@ export interface peicXLSXCompleta {
     peictableTipo: peicXLSXTipo[];
 }
 
-
 export interface icfXLSXSubtipos {
     tipo: string;
     indice: boolean;
-    total: number;
-    "até 10sm - %": number;
-    "mais de 10sm - %": number;
+    total: string;
+    "até 10sm - %": string;
+    "mais de 10sm - %": string;
 }
 
 export interface icfXLSXTipo {
@@ -102,4 +101,24 @@ export interface icfXLSXTipo {
 
 export interface icfXLSXCompleta {
     icftableTipo: icfXLSXTipo[];
+}
+
+export interface icecXLSXSubtipos {
+    tipo: string;
+    indice: boolean;
+    total: string;
+    "Empresas com até 50 empregados": string;
+    "Empresas com mais de 50 empregados": string;
+    semiduraveis: string;
+    nao_duraveis: string;
+    duraveis: string;
+}
+
+export interface icecXLSXTipo {
+    tipo: string;
+    valores: icecXLSXSubtipos[];
+}
+
+export interface icecXLSXCompleta {
+    icectableTipo: icecXLSXTipo[];
 }

@@ -7,14 +7,14 @@ export class Peic {
     @PrimaryGeneratedColumn("uuid")
     id?: string
 
-    @Column({ type: 'float', nullable: false })
-    ENDIVIDADOS_PERCENTUAL: number
+    @Column({ type: 'text', nullable: false })
+    ENDIVIDADOS_PERCENTUAL: string
 
-    @Column({ type: 'float', nullable: false })
-    CONTAS_EM_ATRASO_PERCENTUAL: number
+    @Column({ type: 'text', nullable: false })
+    CONTAS_EM_ATRASO_PERCENTUAL: string
 
-    @Column({ type: 'float', nullable: false })
-    NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL: number
+    @Column({ type: 'text', nullable: false })
+    NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL: string
 
     @Column({ type: "text", nullable: false })
     ENDIVIDADOS_ABSOLUTO: string

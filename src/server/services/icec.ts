@@ -265,19 +265,16 @@ export class IcecService {
                 throw new Error('Linha com dados ICEC não encontrada');
             }
 
-            // Extrair valores numéricos (colunas 1-6: Total, Até 50, Mais de 50, Semiduráveis, Não duráveis, Duráveis)
-            const numericData = icecRow.slice(1, 7).map(val => {
-                const num = parseFloat(String(val || '0').replace(',', '.'));
-                return isNaN(num) ? 0 : num;
-            });
+            // Extrair valores como string preservando o valor original (colunas 1-6: Total, Até 50, Mais de 50, Semiduráveis, Não duráveis, Duráveis)
+            const stringData = icecRow.slice(1, 7).map(val => String(val || ''));
 
             return {
-                ICEC: numericData[0],
-                ATÉ_50: numericData[1],
-                MAIS_DE_50: numericData[2],
-                SEMIDURAVEIS: numericData[3],
-                NAO_DURAVEIS: numericData[4],
-                DURAVEIS: numericData[5],
+                ICEC: stringData[0],
+                ATÉ_50: stringData[1],
+                MAIS_DE_50: stringData[2],
+                SEMIDURAVEIS: stringData[3],
+                NAO_DURAVEIS: stringData[4],
+                DURAVEIS: stringData[5],
                 MES: mes,
                 ANO: ano,
                 REGIAO: regiao as Regiao,
@@ -592,20 +589,13 @@ export class IcecService {
             throw new Error(`Dados ICEC insuficientes. Esperado: 6 valores, Encontrado: ${values.length}`);
         }
 
-        // Parsear valores numéricos do ICEC (formato brasileiro com vírgula)
-        const parseIcecValue = (value: string): number => {
-            const cleanValue = String(value).replace(',', '.');
-            const num = parseFloat(cleanValue);
-            return isNaN(num) ? 0 : num;
-        };
-
         return {
-            ICEC: parseIcecValue(values[0]),           // 104,1
-            ATÉ_50: parseIcecValue(values[1]),         // 104,0  
-            MAIS_DE_50: parseIcecValue(values[2]),     // 108,0
-            SEMIDURAVEIS: parseIcecValue(values[3]),   // 111,1
-            NAO_DURAVEIS: parseIcecValue(values[4]),   // 103,4
-            DURAVEIS: parseIcecValue(values[5])        // 100,6
+            ICEC: String(values[0] || ''),           // Mantendo como string
+            ATÉ_50: String(values[1] || ''),         // Mantendo como string
+            MAIS_DE_50: String(values[2] || ''),     // Mantendo como string
+            SEMIDURAVEIS: String(values[3] || ''),   // Mantendo como string
+            NAO_DURAVEIS: String(values[4] || ''),   // Mantendo como string
+            DURAVEIS: String(values[5] || '')        // Mantendo como string
         };
     }
 }

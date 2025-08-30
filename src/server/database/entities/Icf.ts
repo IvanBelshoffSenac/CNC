@@ -8,23 +8,23 @@ export class Icf {
     @PrimaryGeneratedColumn("uuid")
     id?: string
 
-    @Column({ type: 'float', nullable: false })
-    NC_PONTOS: number
+    @Column({ type: 'text', nullable: false })
+    NC_PONTOS: string
 
-    @Column({ type: 'float', nullable: false })
-    ATE_10_SM_PONTOS: number
+    @Column({ type: 'text', nullable: false })
+    ATE_10_SM_PONTOS: string
 
-    @Column({ type: 'float', nullable: false })
-    MAIS_DE_10_SM_PONTOS: number
+    @Column({ type: 'text', nullable: false })
+    MAIS_DE_10_SM_PONTOS: string
 
-    @Column({ type: 'float', nullable: false })
-    NC_PERCENTUAL: number
+    @Column({ type: 'text', nullable: false })
+    NC_PERCENTUAL: string
 
-    @Column({ type: 'float', nullable: false })
-    ATE_10_SM_PERCENTUAL: number
+    @Column({ type: 'text', nullable: false })
+    ATE_10_SM_PERCENTUAL: string
 
-    @Column({ type: 'float', nullable: false })
-    MAIS_DE_10_SM_PERCENTUAL: number
+    @Column({ type: 'text', nullable: false })
+    MAIS_DE_10_SM_PERCENTUAL: string
 
     @Column({ type: 'int', nullable: false })
     MES: number
