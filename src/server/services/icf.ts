@@ -17,15 +17,6 @@ import {
 } from '../shared/utils';
 import { In } from 'typeorm';
 
-interface IcfCompleteData {
-    NC_PONTOS: string;
-    ATE_10_SM_PONTOS: string;
-    MAIS_DE_10_SM_PONTOS: string;
-    NC_PERCENTUAL: string;
-    ATE_10_SM_PERCENTUAL: string;
-    MAIS_DE_10_SM_PERCENTUAL: string;
-}
-
 export class IcfService {
 
     private readonly TEMP_DIR = path.join(__dirname, '../../../temp');
@@ -328,7 +319,7 @@ export class IcfService {
     /**
      * Processa os valores completos da tabela ICF.
      */
-    private processCompleteIcfTableValues(values: string[]): IcfCompleteData {
+    private processCompleteIcfTableValues(values: string[]): Icf {
         console.log('🔄 Processando valores completos ICF:', values);
 
         if (values.length < 6) {
@@ -344,14 +335,18 @@ export class IcfService {
             // Próximos 3 valores são os percentuais - mantendo como string
             NC_PERCENTUAL: String(values[3] || ''),          // NC (percentual)
             ATE_10_SM_PERCENTUAL: String(values[4] || ''),   // Até 10 SM (percentual)
-            MAIS_DE_10_SM_PERCENTUAL: String(values[5] || '') // Mais de 10 SM (percentual)
+            MAIS_DE_10_SM_PERCENTUAL: String(values[5] || ''), // Mais de 10 SM (percentual)
+            MES: 0, // Será definido posteriormente
+            ANO: 0, // Será definido posteriormente
+            REGIAO: 'BR' as any, // Será definido posteriormente
+            METODO: Metodo.PLA
         };
     }
 
     /**
      * Extrai os dados completos da tabela ICF para um determinado mês e ano.
      */
-    private async extractCompleteTableData(page: any, mes: number, ano: number): Promise<IcfCompleteData> {
+    private async extractCompleteTableData(page: any, mes: number, ano: number): Promise<Icf> {
         // Mapear mês para formato abreviado em inglês (JUL 25)
         const meses = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
         const mesAbrev = meses[mes - 1];
@@ -587,7 +582,7 @@ export class IcfService {
     * Extrai os dados completos ICF de uma planilha Excel (pontos + percentuais)
     * Estrutura da nova planilha: já contém os percentuais calculados na linha "Índice (Variação Mensal)"
     */
-    private async extractCompleteDataFromExcel(filePath: string): Promise<IcfCompleteData> {
+    private async extractCompleteDataFromExcel(filePath: string): Promise<Icf> {
         try {
             const workbook = XLSX.readFile(filePath);
             const sheetName = workbook.SheetNames[0];
@@ -635,7 +630,11 @@ export class IcfService {
                 MAIS_DE_10_SM_PONTOS: pontosData[2],
                 NC_PERCENTUAL: percentuaisData[0],
                 ATE_10_SM_PERCENTUAL: percentuaisData[1],
-                MAIS_DE_10_SM_PERCENTUAL: percentuaisData[2]
+                MAIS_DE_10_SM_PERCENTUAL: percentuaisData[2],
+                MES: 0, // Será definido posteriormente
+                ANO: 0, // Será definido posteriormente
+                REGIAO: 'BR' as any, // Será definido posteriormente
+                METODO: Metodo.PLA
             };
         } catch (error) {
             throw new Error(`Erro ao processar arquivo Excel ICF: ${error}`);

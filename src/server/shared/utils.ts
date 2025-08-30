@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { icfXLSXCompleta, icfXLSXTipo, IPeriod, peicXLSXCompleta, peicXLSXTipo } from './interfaces';
+import { icfXLSXCompleta, icfXLSXTipo, IPeriod, peicXLSXCompleta, peicXLSXTipo, icecXLSXCompleta, icecXLSXTipo } from './interfaces';
 import { metadadosIcfRepository } from '../database/repositories';
 
 
@@ -546,5 +546,68 @@ export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
 
     return {
         icftableTipo: result
+    };
+}
+
+export function transformJsonToICEC(jsonData: any[][]): icecXLSXCompleta {
+    const result: icecXLSXTipo[] = [];
+    let currentTipo: icecXLSXTipo | null = null;
+
+    // Função helper para verificar se é a primeira linha inválida (com nulls e "Porte")
+    const isInvalidFirstLine = (row: any[]): boolean => {
+        return row[0] === null && row[1] === null && row[2] === "Porte";
+    };
+
+    for (let i = 0; i < jsonData.length; i++) {
+        const row = jsonData[i];
+
+        // Ignorar linha inválida do início
+        if (isInvalidFirstLine(row)) {
+            continue;
+        }
+
+        // Verifica se é uma linha de cabeçalho (nova categoria)
+        // Tipo 1: Categorias normais com "total - em %"
+        // Tipo 2: Categorias de variação mensal com "Total"
+        const isNormalHeader = row[1] === "total - em %" && row[2] === "Empresas com até 50 empregados" && row[3] === "Empresas com mais de 50 empregados";
+        const isVariacaoMensalHeader = row[1] === "Total" && row[2] === "Empresas com até 50 empregados" && row[3] === "Empresas com mais de 50 empregados";
+
+        if (isNormalHeader || isVariacaoMensalHeader) {
+            // Se já existe um tipo atual, adiciona ao resultado
+            if (currentTipo) {
+                result.push(currentTipo);
+            }
+
+            // Cria novo tipo (usar apenas o nome da categoria, ignorando qualquer título de índice na coluna 7)
+            currentTipo = {
+                tipo: row[0],
+                valores: []
+            };
+        } else if (currentTipo && row[0] && row[1] !== undefined) {
+            
+            // Verifica se é um índice verdadeiro
+            const isIndice = (row[0] === "Índice" || row[0] === "Índice (em Pontos)");
+
+            // Adiciona o valor (seja índice ou não)
+            currentTipo.valores.push({
+                tipo: row[0],
+                indice: isIndice,
+                total: row[1] || '',
+                "Empresas com até 50 empregados": row[2] || '',
+                "Empresas com mais de 50 empregados": row[3] || '',
+                semiduraveis: row[4] || '',
+                nao_duraveis: row[5] || '',
+                duraveis: row[6] || ''
+            });
+        }
+    }
+
+    // Adiciona o último tipo se existir
+    if (currentTipo) {
+        result.push(currentTipo);
+    }
+
+    return {
+        icectableTipo: result
     };
 }

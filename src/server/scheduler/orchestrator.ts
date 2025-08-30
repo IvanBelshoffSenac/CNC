@@ -18,8 +18,39 @@ export class TaskOrchestrator {
         console.log('🎯 Orquestrador de Tarefas inicializado');
         console.log('📅 Agendamentos serão configurados dinamicamente via variáveis de ambiente');
         console.log('   • Configure SCHEDULE_ICEC, SCHEDULE_ICF, SCHEDULE_PEIC no .env');
+        console.log('   • Configure ENABLED_ICEC, ENABLED_ICF, ENABLED_PEIC para habilitar/desabilitar serviços');
         console.log('   • Padrão: ICEC às 02:00, ICF às 05:00, PEIC às 08:00 (todo dia 1)');
         console.log('   • Relatório: Enviado automaticamente após cada execução\n');
+    }
+
+    /**
+     * Verifica se um serviço está habilitado através das variáveis de ambiente
+     */
+    private isServiceEnabled(serviceName: 'ICEC' | 'ICF' | 'PEIC'): boolean {
+        const envVar = `ENABLED_${serviceName}`;
+        const value = process.env[envVar];
+        // Se não estiver definido, considera como habilitado (true)
+        return value === undefined || value.toLowerCase() === 'true';
+    }
+
+    /**
+     * Verifica se pelo menos um serviço está habilitado
+     */
+    private hasEnabledServices(): boolean {
+        return this.isServiceEnabled('ICEC') || 
+               this.isServiceEnabled('ICF') || 
+               this.isServiceEnabled('PEIC');
+    }
+
+    /**
+     * Exibe o status dos serviços habilitados
+     */
+    private logServicesStatus(): void {
+        console.log('⚙️  Status dos serviços:');
+        console.log(`   • ICEC: ${this.isServiceEnabled('ICEC') ? '✅ Habilitado' : '❌ Desabilitado'}`);
+        console.log(`   • ICF:  ${this.isServiceEnabled('ICF') ? '✅ Habilitado' : '❌ Desabilitado'}`);
+        console.log(`   • PEIC: ${this.isServiceEnabled('PEIC') ? '✅ Habilitado' : '❌ Desabilitado'}`);
+        console.log('');
     }
 
     /**
@@ -82,33 +113,57 @@ export class TaskOrchestrator {
             return;
         }
 
+        // Verificar se há serviços habilitados
+        if (!this.hasEnabledServices()) {
+            console.log('❌ === TODOS OS SERVIÇOS ESTÃO DESABILITADOS ===');
+            console.log('⚠️  Nenhum serviço será executado. Verifique as variáveis de ambiente:');
+            console.log('   • ENABLED_ICEC, ENABLED_ICF, ENABLED_PEIC');
+            console.log('🔚 Encerrando aplicação...\n');
+            return;
+        }
+
         console.log('🚀 === INICIANDO PROCESSAMENTO COMPLETO COM MONITORAMENTO ===\n');
+        this.logServicesStatus();
         const startTime = Date.now();
         this.isRunning = true;
 
         const resultados: IServiceResult[] = [];
 
         try {
-            // Executar todos os serviços
-            const icecResult = await this.runIcecWithMonitoring();
-            resultados.push(icecResult);
+            // Executar apenas os serviços habilitados
+            if (this.isServiceEnabled('ICEC')) {
+                const icecResult = await this.runIcecWithMonitoring();
+                resultados.push(icecResult);
+            } else {
+                console.log('⏭️  ICEC desabilitado - pulando execução\n');
+            }
 
-            const icfResult = await this.runIcfWithMonitoring();
-            resultados.push(icfResult);
+            if (this.isServiceEnabled('ICF')) {
+                const icfResult = await this.runIcfWithMonitoring();
+                resultados.push(icfResult);
+            } else {
+                console.log('⏭️  ICF desabilitado - pulando execução\n');
+            }
 
-            const peicResult = await this.runPeicWithMonitoring();
-            resultados.push(peicResult);
+            if (this.isServiceEnabled('PEIC')) {
+                const peicResult = await this.runPeicWithMonitoring();
+                resultados.push(peicResult);
+            } else {
+                console.log('⏭️  PEIC desabilitado - pulando execução\n');
+            }
 
             const endTime = Date.now();
             const duration = Math.round((endTime - startTime) / 1000 / 60);
 
             console.log('🎉 === PROCESSAMENTO COMPLETO FINALIZADO ===');
             console.log(`⏱️  Tempo total: ${duration} minutos`);
-            console.log('📊 Todos os índices foram processados e salvos no banco de dados');
+            console.log('📊 Índices habilitados foram processados e salvos no banco de dados');
 
             // Enviar relatório por e-mail
-            console.log('📧 Enviando relatório de monitoramento...');
-            await this.notificationService.enviarRelatorioCompleto(resultados, 'Forçado');
+            if (resultados.length > 0) {
+                console.log('📧 Enviando relatório de monitoramento...');
+                await this.notificationService.enviarRelatorioCompleto(resultados, 'Agendado');
+            }
 
         } catch (error) {
             console.error('❌ Erro durante o processamento completo:', error);
@@ -117,7 +172,7 @@ export class TaskOrchestrator {
             if (resultados.length > 0) {
                 try {
                     console.log('📧 Enviando relatório parcial devido ao erro...');
-                    await this.notificationService.enviarRelatorioCompleto(resultados, 'Forçado');
+                    await this.notificationService.enviarRelatorioCompleto(resultados, 'Agendado');
                 } catch (notificationError) {
                     console.error('❌ Erro adicional ao enviar notificação:', notificationError);
                 }
@@ -137,38 +192,60 @@ export class TaskOrchestrator {
             return;
         }
 
+        // Verificar se há serviços habilitados
+        if (!this.hasEnabledServices()) {
+            console.log('❌ === TODOS OS SERVIÇOS ESTÃO DESABILITADOS ===');
+            console.log('⚠️  Nenhum serviço será executado. Verifique as variáveis de ambiente:');
+            console.log('   • ENABLED_ICEC, ENABLED_ICF, ENABLED_PEIC');
+            console.log('🔚 Encerrando aplicação...\n');
+            return;
+        }
+
         console.log('🚀 === INICIANDO PROCESSAMENTO FORÇADO COM MONITORAMENTO ===\n');
+        this.logServicesStatus();
         const startTime = Date.now();
         this.isRunning = true;
 
         const resultados: IServiceResult[] = [];
 
         try {
+            // Executar apenas os serviços habilitados
+            if (this.isServiceEnabled('ICEC')) {
+                const icecResult = await this.runIcecWithMonitoring();
+                icecResult.modoExecucao = 'Forçado';
+                resultados.push(icecResult);
+            } else {
+                console.log('⏭️  ICEC desabilitado - pulando execução\n');
+            }
 
-            /*
-            const icfResult = await this.runIcfWithMonitoring();
-            icfResult.modoExecucao = 'Forçado';
-            resultados.push(icfResult);
+            if (this.isServiceEnabled('ICF')) {
+                const icfResult = await this.runIcfWithMonitoring();
+                icfResult.modoExecucao = 'Forçado';
+                resultados.push(icfResult);
+            } else {
+                console.log('⏭️  ICF desabilitado - pulando execução\n');
+            }
 
-            const icecResult = await this.runIcecWithMonitoring();
-            icecResult.modoExecucao = 'Forçado';
-            resultados.push(icecResult);
-            */
-           
-            const peicResult = await this.runPeicWithMonitoring();
-            peicResult.modoExecucao = 'Forçado';
-            resultados.push(peicResult);
+            if (this.isServiceEnabled('PEIC')) {
+                const peicResult = await this.runPeicWithMonitoring();
+                peicResult.modoExecucao = 'Forçado';
+                resultados.push(peicResult);
+            } else {
+                console.log('⏭️  PEIC desabilitado - pulando execução\n');
+            }
 
             const endTime = Date.now();
             const duration = Math.round((endTime - startTime) / 1000 / 60);
 
             console.log('🎉 === PROCESSAMENTO FORÇADO FINALIZADO ===');
             console.log(`⏱️  Tempo total: ${duration} minutos`);
-            console.log('📊 Todos os índices foram processados e salvos no banco de dados');
+            console.log('📊 Índices habilitados foram processados e salvos no banco de dados');
 
             // Enviar relatório por e-mail
-            console.log('📧 Enviando relatório de monitoramento (modo forçado)...');
-            await this.notificationService.enviarRelatorioCompleto(resultados, 'Forçado');
+            if (resultados.length > 0) {
+                console.log('📧 Enviando relatório de monitoramento (modo forçado)...');
+                await this.notificationService.enviarRelatorioCompleto(resultados, 'Forçado');
+            }
 
         } catch (error) {
             console.error('❌ Erro durante o processamento forçado:', error);
@@ -192,6 +269,12 @@ export class TaskOrchestrator {
      * Executa tarefa individual com controle de sobreposição e monitoramento
      */
     private async runTaskWithMonitoring(taskName: string, taskFunction: () => Promise<IServiceResult>): Promise<void> {
+        // Verificar se o serviço específico está habilitado
+        if (!this.isServiceEnabled(taskName as 'ICEC' | 'ICF' | 'PEIC')) {
+            console.log(`⏭️  [${taskName}] Serviço desabilitado - execução ignorada`);
+            return;
+        }
+
         if (this.isRunning) {
             console.log(`⚠️  [${taskName}] Tarefa ignorada - processamento em execução`);
             return;
@@ -222,39 +305,63 @@ export class TaskOrchestrator {
      * Inicia o orquestrador com agendamentos CRON (com monitoramento)
      */
     public startScheduler(): void {
+        // Verificar se há serviços habilitados
+        if (!this.hasEnabledServices()) {
+            console.log('❌ === TODOS OS SERVIÇOS ESTÃO DESABILITADOS ===');
+            console.log('⚠️  Nenhum agendamento será criado. Verifique as variáveis de ambiente:');
+            console.log('   • ENABLED_ICEC, ENABLED_ICF, ENABLED_PEIC');
+            console.log('🔚 Encerrando aplicação...\n');
+            return;
+        }
+
         // Configurações de agendamento das variáveis de ambiente ou valores padrão
         const scheduleIcec = process.env.SCHEDULE_ICEC || '0 2 1 * *';
         const scheduleIcf = process.env.SCHEDULE_ICF || '0 5 1 * *';
         const schedulePeic = process.env.SCHEDULE_PEIC || '0 8 1 * *';
 
         console.log('⚡ Configurações de agendamento:');
-        console.log(`   • ICEC: ${scheduleIcec} ${process.env.SCHEDULE_ICEC ? '(customizado)' : '(padrão)'}`);
-        console.log(`   • ICF:  ${scheduleIcf} ${process.env.SCHEDULE_ICF ? '(customizado)' : '(padrão)'}`);
-        console.log(`   • PEIC: ${schedulePeic} ${process.env.SCHEDULE_PEIC ? '(customizado)' : '(padrão)'}`);
+        console.log(`   • ICEC: ${scheduleIcec} ${process.env.SCHEDULE_ICEC ? '(customizado)' : '(padrão)'} - ${this.isServiceEnabled('ICEC') ? '✅ Habilitado' : '❌ Desabilitado'}`);
+        console.log(`   • ICF:  ${scheduleIcf} ${process.env.SCHEDULE_ICF ? '(customizado)' : '(padrão)'} - ${this.isServiceEnabled('ICF') ? '✅ Habilitado' : '❌ Desabilitado'}`);
+        console.log(`   • PEIC: ${schedulePeic} ${process.env.SCHEDULE_PEIC ? '(customizado)' : '(padrão)'} - ${this.isServiceEnabled('PEIC') ? '✅ Habilitado' : '❌ Desabilitado'}`);
         console.log('');
 
-        // ICEC: Agendamento configurável - COM MONITORAMENTO
-        cron.schedule(scheduleIcec, async () => {
-            await this.runTaskWithMonitoring('ICEC', () => this.runIcecWithMonitoring());
-        }, {
-            timezone: "America/Sao_Paulo"
-        });
+        // ICEC: Agendamento configurável - COM MONITORAMENTO (apenas se habilitado)
+        if (this.isServiceEnabled('ICEC')) {
+            cron.schedule(scheduleIcec, async () => {
+                await this.runTaskWithMonitoring('ICEC', () => this.runIcecWithMonitoring());
+            }, {
+                timezone: "America/Sao_Paulo"
+            });
+            console.log('📅 ICEC agendado');
+        } else {
+            console.log('⏭️  ICEC desabilitado - agendamento ignorado');
+        }
 
-        // ICF: Agendamento configurável - COM MONITORAMENTO
-        cron.schedule(scheduleIcf, async () => {
-            await this.runTaskWithMonitoring('ICF', () => this.runIcfWithMonitoring());
-        }, {
-            timezone: "America/Sao_Paulo"
-        });
+        // ICF: Agendamento configurável - COM MONITORAMENTO (apenas se habilitado)
+        if (this.isServiceEnabled('ICF')) {
+            cron.schedule(scheduleIcf, async () => {
+                await this.runTaskWithMonitoring('ICF', () => this.runIcfWithMonitoring());
+            }, {
+                timezone: "America/Sao_Paulo"
+            });
+            console.log('📅 ICF agendado');
+        } else {
+            console.log('⏭️  ICF desabilitado - agendamento ignorado');
+        }
 
-        // PEIC: Agendamento configurável - COM MONITORAMENTO
-        cron.schedule(schedulePeic, async () => {
-            await this.runTaskWithMonitoring('PEIC', () => this.runPeicWithMonitoring());
-        }, {
-            timezone: "America/Sao_Paulo"
-        });
+        // PEIC: Agendamento configurável - COM MONITORAMENTO (apenas se habilitado)
+        if (this.isServiceEnabled('PEIC')) {
+            cron.schedule(schedulePeic, async () => {
+                await this.runTaskWithMonitoring('PEIC', () => this.runPeicWithMonitoring());
+            }, {
+                timezone: "America/Sao_Paulo"
+            });
+            console.log('📅 PEIC agendado');
+        } else {
+            console.log('⏭️  PEIC desabilitado - agendamento ignorado');
+        }
 
-        console.log('⚡ Orquestrador ativo com monitoramento - aguardando próximas execuções...');
+        console.log('\n⚡ Orquestrador ativo com monitoramento - aguardando próximas execuções...');
         console.log('🔄 Para forçar execução com monitoramento: npm run force-monitored');
         console.log('🔄 Para forçar execução sem monitoramento: npm run force\n');
     }
@@ -270,18 +377,31 @@ export class TaskOrchestrator {
     /**
      * Retorna status da execução
      */
-    public getStatus(): { isRunning: boolean; nextExecutions: string[] } {
+    public getStatus(): { isRunning: boolean; nextExecutions: string[]; servicesEnabled: string[] } {
         const scheduleIcec = process.env.SCHEDULE_ICEC || '0 2 1 * *';
         const scheduleIcf = process.env.SCHEDULE_ICF || '0 5 1 * *';
         const schedulePeic = process.env.SCHEDULE_PEIC || '0 8 1 * *';
 
+        const nextExecutions: string[] = [];
+        const servicesEnabled: string[] = [];
+
+        if (this.isServiceEnabled('ICEC')) {
+            nextExecutions.push(`ICEC: ${scheduleIcec}`);
+            servicesEnabled.push('ICEC');
+        }
+        if (this.isServiceEnabled('ICF')) {
+            nextExecutions.push(`ICF: ${scheduleIcf}`);
+            servicesEnabled.push('ICF');
+        }
+        if (this.isServiceEnabled('PEIC')) {
+            nextExecutions.push(`PEIC: ${schedulePeic}`);
+            servicesEnabled.push('PEIC');
+        }
+
         return {
             isRunning: this.isRunning,
-            nextExecutions: [
-                `ICEC: ${scheduleIcec}`,
-                `ICF: ${scheduleIcf}`,
-                `PEIC: ${schedulePeic}`
-            ]
+            nextExecutions,
+            servicesEnabled
         };
     }
 }

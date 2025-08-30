@@ -3,244 +3,360 @@ import * as XLSX from 'xlsx';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { chromium } from 'playwright';
-import { Icec } from '../database/entities/Icec';
-import { icecRepository } from '../database/repositories/icecRepository';
-import { Regiao, Metodo, IErrorService, ITask, IServiceResult } from '../shared/interfaces';
-import { 
+import { icecRepository, metadadosIcecRepository } from '../database/repositories';
+import { Icec, MetadadosIcec } from '../database/entities';
+import { Regiao, Metodo, IErrorService, ITask, IServiceResult, IPeriod } from '../shared/interfaces';
+import {
     generateServicePeriods,
     extractServicePeriodRange,
-    formatPeriod, 
-    formatPeriodDisplay, 
-    calculateExecutionTime, 
-    calculateTaskStats, 
+    calculateExecutionTime,
+    calculateTaskStats,
     cleanupServiceTempFolder,
-    LogMessages
+    LogMessages,
+    transformJsonToICEC,
 } from '../shared/utils';
+import { In } from 'typeorm';
 
 export class IcecService {
+
     private readonly TEMP_DIR = path.join(__dirname, '../../../temp');
+    private readonly TIMEOUT = 30000;
     private baseUrl = process.env.BASE_URL || 'https://backend.pesquisascnc.com.br/admin/4/upload';
 
+    constructor() {
+        this.ensureTempDirectory();
+    }
+
     /**
-     * Versão com monitoramento do processamento ICEC
+     * Constrói o diretório temporário para armazenar arquivos
      */
-    public async processAllIcecDataWithMonitoring(regioes: string[] = ['BR']): Promise<IServiceResult> {
-        const startTime = Date.now();
-        console.log('🚀 Iniciando processamento completo dos dados ICEC com monitoramento...\n');
-
-        const resultadoLimpeza = await this.cleanDatabase();
-        console.log(resultadoLimpeza);
-
-        console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
-
-        const periods = generateServicePeriods('ICEC');
-        const tasks: ITask[] = [];
-        let registrosPlanilha = 0;
-        let registrosWebScraping = 0;
-        let erros: IErrorService[] = [];
-
-        // Primeira tentativa com download de planilhas
-        for (const period of periods) {
-            for (const regiao of regioes) {
-                try {
-                    console.log(LogMessages.processando('ICEC', regiao, period.mes, period.ano));
-
-                    const filePath = await this.downloadFile(period.mes, period.ano, regiao);
-                    const data = await this.extractDataFromExcel(filePath, period.mes, period.ano, regiao);
-                    await this.saveToDatabase(data);
-                    // Arquivo será limpo ao final da execução
-
-                    console.log(LogMessages.sucesso('ICEC', regiao, period.mes, period.ano));
-                    
-                    tasks.push({
-                        mes: period.mes,
-                        ano: period.ano,
-                        regiao,
-                        status: 'Sucesso',
-                        servico: 'ICEC',
-                        metodo: Metodo.PLA
-                    });
-                    
-                    registrosPlanilha++;
-
-                } catch (error) {
-                    console.log(LogMessages.erro('ICEC', regiao, period.mes, period.ano, error));
-                    
-                    tasks.push({
-                        mes: period.mes,
-                        ano: period.ano,
-                        regiao,
-                        status: 'Falha',
-                        servico: 'ICEC',
-                        metodo: Metodo.PLA,
-                        erro: error.toString()
-                    });
-                    
-                    erros.push({
-                        regiao,
-                        mes: period.mes,
-                        ano: period.ano
-                    });
-                }
-            }
-        }
-
-        // Segunda tentativa com web scraping para os erros
-        if (erros.length > 0) {
-            console.log(`\n🔄 Iniciando segunda tentativa com web scraping para ${erros.length} períodos...`);
-            const sucessosWebScraping = await this.retryWithWebScrapingMonitoring(erros, tasks);
-            registrosWebScraping = sucessosWebScraping;
-        }
-
-        const endTime = Date.now();
-        const tempoExecucao = calculateExecutionTime(startTime, endTime);
-        
-        const { sucessos, falhas } = calculateTaskStats(tasks);
-
-        // Extrair períodos dinamicamente
-        const { periodoInicio, periodoFim } = extractServicePeriodRange(periods);
-
-        const resultado: IServiceResult = {
-            servico: 'ICEC',
-            periodoInicio,
-            periodoFim,
-            tempoExecucao,
-            tasks,
-            totalRegistros: tasks.length, // Total geral (sucessos + falhas)
-            registrosPlanilha,
-            registrosWebScraping,
-            sucessos,
-            falhas
-        };
-
-        console.log(`\n=== Processamento ICEC concluído ===`);
-        console.log(`Sucessos: ${sucessos}`);
-        console.log(`Falhas: ${falhas}`);
-        console.log(`Tempo: ${Math.round(tempoExecucao / 60)} minutos`);
-        console.log(`Registros por planilha: ${registrosPlanilha}`);
-        console.log(`Registros por web scraping: ${registrosWebScraping}`);
-
-        // Limpeza da pasta temp ao final da execução
-        await cleanupServiceTempFolder('icec', this.TEMP_DIR);
-
-        return resultado;
-    }
-
-    public async processAllIcecData(regioes: string[] = ['BR']): Promise<void> {
-        console.log('🚀 Iniciando processamento completo dos dados ICEC...\n');
-
-        const resultadoLimpeza = await this.cleanDatabase();
-        console.log(resultadoLimpeza);
-
-        console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
-
-        const periods = generateServicePeriods('ICEC');
-        let processados = 0;
-        let sucessos = 0;
-        let erros: IErrorService[] = [];
-        const totalProcessos = periods.length * regioes.length;
-
-        for (const period of periods) {
-            for (const regiao of regioes) {
-                try {
-                    console.log(LogMessages.processando('ICEC', regiao, period.mes, period.ano));
-
-                    const filePath = await this.downloadFile(period.mes, period.ano, regiao);
-                    const data = await this.extractDataFromExcel(filePath, period.mes, period.ano, regiao);
-                    await this.saveToDatabase(data);
-                    // Arquivo será limpo ao final da execução
-
-                    console.log(LogMessages.sucesso('ICEC', regiao, period.mes, period.ano));
-                    sucessos++;
-
-                } catch (error) {
-                    console.log(LogMessages.erro('ICEC', regiao, period.mes, period.ano, error));
-                    erros.push({
-                        regiao,
-                        mes: period.mes,
-                        ano: period.ano
-                    });
-                }
-
-                processados++;
-            }
-        }
-
-        console.log(`\n=== Processamento concluído ===`);
-        console.log(`Sucessos: ${sucessos}`);
-        console.log(`Erros: ${erros.length}`);
-        console.log(`Total: ${totalProcessos}`);
-
-        if (erros.length > 0) {
-            console.log(`\n📋 Lista de períodos com erro:`);
-            erros.forEach(erro => {
-                console.log(`   ❌ ${formatPeriodDisplay(erro.regiao, erro.mes, erro.ano)}`);
-            });
-
-            // Segunda tentativa com web scraping
-            console.log(`\n🔄 Iniciando segunda tentativa com web scraping...`);
-            await this.retryWithWebScraping(erros);
-        }
-    }
-
-    public async testSinglePeriod(mes: number, ano: number, regiao: string = 'BR'): Promise<void> {
+    private async ensureTempDirectory(): Promise<void> {
         try {
-            console.log(LogMessages.teste('ICEC', regiao, mes, ano));
+            await fs.ensureDir(this.TEMP_DIR);
+        } catch (error) {
+            throw new Error(`Erro ao criar diretório temporário: ${error}`);
+        }
+    }
 
-            const filePath = await this.downloadFile(mes, ano, regiao);
-            const data = await this.extractDataFromExcel(filePath, mes, ano, regiao);
-            
-            console.log('📈 Dados extraídos:', data);
-            
-            await this.saveToDatabase(data);
-            // Arquivo será limpo ao final da execução
+    // ========================================
+    // SEÇÃO 1: MÉTODOS DE METADADOS
+    // ========================================
 
-            console.log(LogMessages.sucesso('ICEC', regiao, mes, ano));
+    /**
+     * Salva múltiplos lotes de metadados no banco de dados de uma vez (versão otimizada)
+     */
+    private async saveBatchMetadataToDatabase(
+        metadataToSaveList: Array<{ metadados: MetadadosIcec[]; icecId: string }>,
+        registrosPlanilha: Icec[]
+    ): Promise<void> {
+        try {
+            const allMetadataToSave: MetadadosIcec[] = [];
+
+            // Preparar todos os metadados para salvar
+            for (const item of metadataToSaveList) {
+                // Buscar o registro ICEC para vincular
+                const icecEntity = registrosPlanilha.find((i) => i.id === item.icecId);
+
+                if (!icecEntity) {
+                    console.log(`⚠️ Registro ICEC com ID ${item.icecId} não encontrado, pulando...`);
+                    continue;
+                }
+
+                // Vincular cada metadado ao registro ICEC
+                for (const metadado of item.metadados) {
+                    metadado.icec = icecEntity;
+                    allMetadataToSave.push(metadado);
+                }
+            }
+
+            // Salvar todos os metadados de uma vez usando saveMany (mais eficiente)
+            if (allMetadataToSave.length > 0) {
+                await metadadosIcecRepository.save(allMetadataToSave);
+                console.log(`📊 Total de metadados salvos: ${allMetadataToSave.length}`);
+            }
 
         } catch (error) {
-            console.log(LogMessages.erro('ICEC', regiao, mes, ano, error));
+            throw new Error(`Erro ao salvar lotes de metadados ICEC no banco: ${error}`);
+        }
+    }
+
+    /**
+     * Converte valor do Excel para string preservando o valor original
+     */
+    private parseValueToString(value: any): string {
+        if (value === null || value === undefined) return '';
+        return String(value);
+    }
+
+    /**
+     * Extrai os metadados completos da planilha ICEC
+     */
+    private async extractMetadataFromExcel(filePath: string): Promise<MetadadosIcec[]> {
+        try {
+            const workbook = XLSX.readFile(filePath);
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
+            
+            // Usar a função otimizada para extrair dados estruturados
+            const icecCompleta = transformJsonToICEC(jsonData);
+
+            // Converter para o formato MetadadosIcec
+            const metadados: MetadadosIcec[] = [];
+
+            for (const tipo of icecCompleta.icectableTipo) {
+                for (const valor of tipo.valores) {
+                    const metadado = new MetadadosIcec();
+                    metadado.TIPOINDICE = tipo.tipo;
+                    metadado.CAMPO = valor.tipo;
+                    
+                    // Salvar dados brutos como string
+                    metadado.TOTAL = this.parseValueToString(valor.total);
+                    metadado.EMPRESAS_COM_ATÉ_50_EMPREGADOS = this.parseValueToString(valor["Empresas com até 50 empregados"]);
+                    metadado.EMPRESAS_COM_MAIS_DE_50_EMPREGADOS = this.parseValueToString(valor["Empresas com mais de 50 empregados"]);
+                    metadado.SEMIDURAVEIS = this.parseValueToString(valor.semiduraveis);
+                    metadado.NAO_DURAVEIS = this.parseValueToString(valor.nao_duraveis);
+                    metadado.DURAVEIS = this.parseValueToString(valor.duraveis);
+                    metadado.INDICE = valor.indice;
+
+                    metadados.push(metadado);
+                }
+            }
+
+            return metadados;
+
+        } catch (error) {
+            throw new Error(`Erro ao extrair metadados da planilha ICEC: ${error}`);
+        }
+    }
+
+    /**
+     * Localiza um arquivo de planilha já baixado na pasta temporária
+     */
+    private async findExistingExcelFile(regiao: string, mes: number, ano: number): Promise<string | null> {
+        try {
+            const files = await fs.readdir(this.TEMP_DIR);
+
+            // Padrão do nome: icec_REGIAO_MESANO_timestamp.xls
+            // Exemplo: icec_BR_62025_1735123456789.xls
+            const pattern = `icec_${regiao}_${mes}${ano}_`;
+
+            const matchingFile = files.find(file =>
+                file.startsWith(pattern) && file.endsWith('.xls')
+            );
+
+            if (matchingFile) {
+                const fullPath = path.join(this.TEMP_DIR, matchingFile);
+                console.log(`📁 Arquivo encontrado: ${matchingFile}`);
+                return fullPath;
+            }
+
+            console.log(`⚠️ Arquivo não encontrado para padrão: ${pattern}*.xls`);
+            return null;
+        } catch (error) {
+            console.log(`❌ Erro ao buscar arquivo: ${error}`);
+            return null;
+        }
+    }
+
+    /**
+     * Processa metadados para todos os registros ICEC do tipo Planilha
+     */
+    private async processMetadataForPlanilhaRecords(idsIcec: string[]): Promise<void> {
+        try {
+            // 1. Filtrar todos os registros de ICEC do método 'Planilha'
+            const registrosPlanilha = await icecRepository.find({
+                where: { id: In(idsIcec) },
+                order: { ANO: 'ASC', MES: 'ASC' }
+            });
+
+            const registrosMetadados = await metadadosIcecRepository.find({
+                relations: {
+                    icec: true
+                }
+            })
+
+            if (registrosPlanilha.length === 0) {
+                console.log('ℹ️ Nenhum registro ICEC do tipo Planilha encontrado');
+                return;
+            }
+
+            console.log(`📊 Encontrados ${registrosPlanilha.length} registros ICEC do tipo Planilha`);
+
+            interface IPeriodRegion extends IPeriod {
+                regiao: Regiao;
+            }
+
+            // 2. Mapear os registros para extrair períodos únicos por região
+            const periodosMap = new Map<string, IPeriodRegion>();
+
+            for (const registro of registrosPlanilha) {
+                const chaveperiodo = `${registro.MES}-${registro.ANO}-${registro.REGIAO}`;
+                if (!periodosMap.has(chaveperiodo)) {
+                    periodosMap.set(chaveperiodo, {
+                        mes: registro.MES,
+                        ano: registro.ANO,
+                        regiao: registro.REGIAO
+                    });
+                }
+            }
+
+            const periodos: IPeriodRegion[] = Array.from(periodosMap.values());
+            console.log(`📅 Períodos únicos identificados: ${periodos.length}`);
+
+            // Interface para acumular metadados que serão salvos
+            interface MetadataToSave {
+                metadados: MetadadosIcec[];
+                icecId: string;
+            }
+
+            // 3. Para cada período/região, localizar a planilha já baixada e processar metadados
+            const metadataToSaveList: MetadataToSave[] = [];
+
+            for (const periodo of periodos) {
+
+                try {
+                    console.log(`📥 Processando metadados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}...`);
+
+                    // Localizar arquivo já baixado na pasta temporária
+                    const filePath = await this.findExistingExcelFile(periodo.regiao, periodo.mes, periodo.ano);
+
+                    if (!filePath) {
+                        console.log(`⚠️ Arquivo não encontrado para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}, pulando metadados...`);
+                        continue;
+                    }
+
+                    // Extrair metadados da planilha existente
+                    const metadados = await this.extractMetadataFromExcel(filePath);
+
+                    if (metadados.length > 0) {
+                        // Encontrar registros ICEC que correspondem a este período/região
+                        const registrosDoperiodo = registrosPlanilha.filter(
+                            (r) => r.MES === periodo.mes && r.ANO === periodo.ano && r.REGIAO === periodo.regiao
+                        );
+
+                        for (const registro of registrosDoperiodo) {
+                            // Verificar se já existem metadados para este registro
+                            const metadadosExistentes = registrosMetadados.filter(
+                                (m) => m.icec && m.icec.id === registro.id
+                            );
+
+                            if (metadadosExistentes.length === 0) {
+                                metadataToSaveList.push({
+                                    metadados: [...metadados], // Fazer cópia dos metadados
+                                    icecId: registro.id!
+                                });
+                                console.log(`✅ Metadados preparados para ICEC ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
+                            } else {
+                                console.log(`ℹ️ Metadados já existem para ICEC ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
+                            }
+                        }
+                    } else {
+                        console.log(`⚠️ Nenhum metadado extraído para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
+                    }
+
+                } catch (error) {
+                    console.log(`❌ Erro ao processar metadados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}: ${error}`);
+                }
+            }
+
+            // Salvar todos os metadados de uma vez
+            if (metadataToSaveList.length > 0) {
+                console.log(`\n💾 Salvando ${metadataToSaveList.length} lotes de metadados no banco de dados...`);
+                await this.saveBatchMetadataToDatabase(metadataToSaveList, registrosPlanilha);
+                console.log(`✅ Todos os metadados foram salvos com sucesso!`);
+            } else {
+                console.log(`ℹ️ Nenhum metadado novo para salvar`);
+            }
+
+            console.log('✅ Processamento de metadados ICEC concluído');
+
+        } catch (error) {
+            console.error('❌ Erro no processamento de metadados ICEC:', error);
             throw error;
         }
     }
 
+    // ========================================
+    // SEÇÃO 2: MÉTODOS DE BANCO DE DADOS
+    // ========================================
+
+    /**
+     * Salva múltiplos registros ICEC no banco de dados de uma vez (versão otimizada)
+     */
+    private async saveBatchIcecToDatabase(icecDataList: Icec[]): Promise<string[]> {
+        try {
+            if (icecDataList.length === 0) {
+                return [];
+            }
+
+            const icecEntities: Icec[] = [];
+
+            for (const data of icecDataList) {
+                const icecEntity = new Icec();
+                icecEntity.ICEC = data.ICEC;
+                icecEntity.ATÉ_50 = data.ATÉ_50;
+                icecEntity.MAIS_DE_50 = data.MAIS_DE_50;
+                icecEntity.SEMIDURAVEIS = data.SEMIDURAVEIS;
+                icecEntity.NAO_DURAVEIS = data.NAO_DURAVEIS;
+                icecEntity.DURAVEIS = data.DURAVEIS;
+                icecEntity.MES = data.MES;
+                icecEntity.ANO = data.ANO;
+                icecEntity.REGIAO = data.REGIAO;
+                icecEntity.METODO = data.METODO;
+
+                icecEntities.push(icecEntity);
+            }
+
+            // Salvar todos de uma vez usando save() com array
+            const savedEntities = await icecRepository.save(icecEntities);
+
+            console.log(`💾 Total de registros ICEC salvos: ${savedEntities.length}`);
+
+            return savedEntities.map(entity => entity.id!);
+        } catch (error) {
+            throw new Error(`Erro ao salvar lote de registros ICEC no banco: ${error}`);
+        }
+    }
+
+    /**
+     * Limpa a base de dados ICEC
+     */
     private async cleanDatabase(): Promise<string> {
         try {
-            await icecRepository.clear();
+            const logMessages: string[] = [];
 
-            return '✅ Base de dados ICEC limpa com sucesso\n';
+            // Limpar metadados primeiro (respeitando foreign key constraint)
+            console.log('🧹 Limpando metadados ICEC...');
+            await metadadosIcecRepository.createQueryBuilder()
+                .delete()
+                .from(MetadadosIcec)
+                .execute();
+            logMessages.push('✅ Metadados ICEC limpos com sucesso');
+
+            // Limpar registros ICEC
+            console.log('🧹 Limpando registros ICEC...');
+            await icecRepository.createQueryBuilder()
+                .delete()
+                .from(Icec)
+                .execute();
+            logMessages.push('✅ Registros ICEC limpos com sucesso');
+
+            return logMessages.join('\n') + '\n';
 
         } catch (error) {
             return `Erro ao limpar a base de dados ICEC: ${error}\n`;
         }
     }
 
-    private buildUrl(mes: number, ano: number, regiao: string = 'BR'): string {
-        return `${this.baseUrl}/${mes}_${ano}/ICEC/${regiao}.xls`;
-    }
+    // ========================================
+    // SEÇÃO 3: MÉTODOS DE PROCESSAMENTO DE DADOS
+    // ========================================
 
-    private async downloadFile(mes: number, ano: number, regiao: string = 'BR'): Promise<string> {
-        try {
-            const url = this.buildUrl(mes, ano, regiao);
-            const response = await axios.get(url, { responseType: 'stream' });
-
-            const tempDir = path.join(process.cwd(), 'temp');
-            await fs.ensureDir(tempDir);
-
-            const filePath = path.join(tempDir, `icec_${regiao}_${mes}_${ano}.xls`);
-            const writer = fs.createWriteStream(filePath);
-
-            response.data.pipe(writer);
-
-            return new Promise((resolve, reject) => {
-                writer.on('finish', () => resolve(filePath));
-                writer.on('error', reject);
-            });
-        } catch (error) {
-            throw new Error(`Erro ao baixar arquivo ICEC: ${error}`);
-        }
-    }
-
-    private async extractDataFromExcel(filePath: string, mes: number, ano: number, regiao: string = 'BR'): Promise<Icec> {
+    /**
+     * Extrai os dados completos ICEC de uma planilha Excel
+     */
+    private async extractCompleteDataFromExcel(filePath: string): Promise<Icec> {
         try {
             const workbook = XLSX.readFile(filePath);
             const sheetName = workbook.SheetNames[0];
@@ -275,9 +391,9 @@ export class IcecService {
                 SEMIDURAVEIS: stringData[3],
                 NAO_DURAVEIS: stringData[4],
                 DURAVEIS: stringData[5],
-                MES: mes,
-                ANO: ano,
-                REGIAO: regiao as Regiao,
+                MES: 0, // Será definido posteriormente
+                ANO: 0, // Será definido posteriormente
+                REGIAO: 'BR' as any, // Será definido posteriormente
                 METODO: Metodo.PLA
             };
         } catch (error) {
@@ -285,157 +401,74 @@ export class IcecService {
         }
     }
 
-    private async saveToDatabase(data: Icec): Promise<void> {
-        try {
-            const icecEntity = new Icec();
-            icecEntity.ICEC = data.ICEC;
-            icecEntity.ATÉ_50 = data.ATÉ_50;
-            icecEntity.MAIS_DE_50 = data.MAIS_DE_50;
-            icecEntity.SEMIDURAVEIS = data.SEMIDURAVEIS;
-            icecEntity.NAO_DURAVEIS = data.NAO_DURAVEIS;
-            icecEntity.DURAVEIS = data.DURAVEIS;
-            icecEntity.MES = data.MES;
-            icecEntity.ANO = data.ANO;
-            icecEntity.REGIAO = data.REGIAO;
-            icecEntity.METODO = data.METODO;
+    // ========================================
+    // SEÇÃO 4: MÉTODOS DE ARQUIVOS
+    // ========================================
 
-            await icecRepository.save(icecEntity);
-        } catch (error) {
-            throw new Error(`Erro ao salvar ICEC no banco: ${error}`);
-        }
-    }
-
-    // Método público para testar web scraping
-    public async testWebScrapingSinglePeriod(mes: number, ano: number, regiao: string = 'BR'): Promise<void> {
-        const browser = await chromium.launch({ headless: false });
+    /**
+     * Realiza o download do arquivo Excel ICEC
+     */
+    private async downloadExcelFile(url: string, identifier: string): Promise<string> {
+        const fileName = `icec_${identifier}_${Date.now()}.xls`;
+        const filePath = path.join(this.TEMP_DIR, fileName);
 
         try {
-            const page = await browser.newPage();
-
-            // Fazer login
-            await this.performLogin(page);
-
-            console.log(LogMessages.webScrapingInicio('ICEC', regiao, mes, ano));
-
-            const data = await this.extractDataFromWebsite(page, mes, ano, regiao);
-            await this.saveToDatabase(data);
-
-            console.log(LogMessages.webScrapingSucesso('ICEC', regiao, mes, ano));
-            console.log('📈 Dados salvos:', data);
-
-        } catch (error) {
-            console.log(LogMessages.webScrapingFalha('ICEC', regiao, mes, ano, error));
-            throw error;
-        } finally {
-            await browser.close();
-        }
-    }
-
-    private async retryWithWebScraping(errorList: IErrorService[]): Promise<void> {
-        const browser = await chromium.launch({ headless: false });
-
-        try {
-            const page = await browser.newPage();
-
-            // Fazer login
-            await this.performLogin(page);
-
-            let sucessosWebScraping = 0;
-            let errosWebScraping = 0;
-
-            for (const error of errorList) {
-                try {
-                    console.log(LogMessages.webScrapingInicio('ICEC', error.regiao, error.mes, error.ano));
-
-                    const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
-                    await this.saveToDatabase(data);
-
-                    console.log(LogMessages.webScrapingSucesso('ICEC', error.regiao, error.mes, error.ano));
-                    sucessosWebScraping++;
-
-                } catch (scrapingError) {
-                    console.log(LogMessages.webScrapingFalha('ICEC', error.regiao, error.mes, error.ano, scrapingError));
-                    errosWebScraping++;
+            const response = await axios({
+                method: 'GET',
+                url: url,
+                responseType: 'stream',
+                timeout: this.TIMEOUT,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
-            }
+            });
 
-            console.log(`\n=== Resultado do Web Scraping ICEC ===`);
-            console.log(`Sucessos: ${sucessosWebScraping}`);
-            console.log(`Erros: ${errosWebScraping}`);
-            console.log(`Total tentativas: ${errorList.length}`);
+            const writer = fs.createWriteStream(filePath);
+            response.data.pipe(writer);
 
-        } finally {
-            await browser.close();
+            return new Promise((resolve, reject) => {
+                writer.on('finish', () => resolve(filePath));
+                writer.on('error', reject);
+            });
+        } catch (error) {
+            throw new Error(`Erro ao baixar arquivo ICEC (${identifier}): ${error}`);
         }
     }
 
     /**
-     * Versão com monitoramento do retry por web scraping
+     * Constrói a URL para o arquivo Excel ICEC
      */
-    private async retryWithWebScrapingMonitoring(errorList: IErrorService[], tasks: ITask[]): Promise<number> {
-        const browser = await chromium.launch({ headless: false });
-
-        try {
-            const page = await browser.newPage();
-
-            // Fazer login
-            await this.performLogin(page);
-
-            let sucessosWebScraping = 0;
-
-            for (const error of errorList) {
-                try {
-                    console.log(LogMessages.webScrapingInicio('ICEC', error.regiao, error.mes, error.ano));
-
-                    const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
-                    await this.saveToDatabase(data);
-
-                    console.log(LogMessages.webScrapingSucesso('ICEC', error.regiao, error.mes, error.ano));
-                    sucessosWebScraping++;
-
-                    // Atualizar task correspondente para sucesso
-                    const taskIndex = tasks.findIndex(t => 
-                        t.mes === error.mes && 
-                        t.ano === error.ano && 
-                        t.regiao === error.regiao && 
-                        t.status === 'Falha'
-                    );
-                    
-                    if (taskIndex !== -1) {
-                        tasks[taskIndex].status = 'Sucesso';
-                        tasks[taskIndex].metodo = Metodo.WS;
-                        delete tasks[taskIndex].erro;
-                    }
-
-                } catch (scrapingError) {
-                    console.log(LogMessages.webScrapingFalha('ICEC', error.regiao, error.mes, error.ano, scrapingError));
-                    
-                    // Atualizar erro na task
-                    const taskIndex = tasks.findIndex(t => 
-                        t.mes === error.mes && 
-                        t.ano === error.ano && 
-                        t.regiao === error.regiao && 
-                        t.status === 'Falha'
-                    );
-                    
-                    if (taskIndex !== -1) {
-                        tasks[taskIndex].erro = `Planilha: ${tasks[taskIndex].erro} | Web Scraping: ${scrapingError}`;
-                    }
-                }
-            }
-
-            console.log(`\n=== Resultado do Web Scraping ICEC ===`);
-            console.log(`Sucessos: ${sucessosWebScraping}`);
-            console.log(`Erros: ${errorList.length - sucessosWebScraping}`);
-            console.log(`Total tentativas: ${errorList.length}`);
-
-            return sucessosWebScraping;
-
-        } finally {
-            await browser.close();
-        }
+    private buildUrl(mes: number, ano: number, regiao: string = 'BR'): string {
+        return `${this.baseUrl}/${mes}_${ano}/ICEC/${regiao}.xls`;
     }
 
+    // ========================================
+    // SEÇÃO 5: MÉTODOS DE WEB SCRAPING
+    // ========================================
+
+    /**
+     * Processa valores da tabela ICEC mantendo como string
+     */
+    private processIcecTableValues(values: string[]): any {
+        console.log('🔄 Processando valores ICEC:', values);
+
+        if (values.length < 6) {
+            throw new Error(`Dados ICEC insuficientes. Esperado: 6 valores, Encontrado: ${values.length}`);
+        }
+
+        return {
+            ICEC: String(values[0] || ''),           // Mantendo como string
+            ATÉ_50: String(values[1] || ''),         // Mantendo como string
+            MAIS_DE_50: String(values[2] || ''),     // Mantendo como string
+            SEMIDURAVEIS: String(values[3] || ''),   // Mantendo como string
+            NAO_DURAVEIS: String(values[4] || ''),   // Mantendo como string
+            DURAVEIS: String(values[5] || '')        // Mantendo como string
+        };
+    }
+
+    /**
+     * Realiza login no site ICEC
+     */
     private async performLogin(page: any): Promise<void> {
         console.log('🔐 Fazendo login no site ICEC...');
 
@@ -464,6 +497,9 @@ export class IcecService {
         console.log('✅ Login confirmado - formulário de pesquisa carregado');
     }
 
+    /**
+     * Extrai dados do site ICEC via web scraping
+     */
     private async extractDataFromWebsite(page: any, mes: number, ano: number, regiao: string): Promise<Icec> {
         console.log(`📊 Extraindo dados do site ICEC para ${regiao} ${mes}/${ano}`);
 
@@ -516,6 +552,9 @@ export class IcecService {
         return icecData;
     }
 
+    /**
+     * Extrai dados da tabela do site ICEC
+     */
     private async extractTableData(page: any, mes: number, ano: number): Promise<any> {
         // Mapear mês para formato abreviado em inglês (JUL 25)
         const meses = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -582,20 +621,207 @@ export class IcecService {
         }
     }
 
-    private processIcecTableValues(values: string[]): any {
-        console.log('🔄 Processando valores ICEC:', values);
+    /**
+     * Versão com monitoramento do retry por web scraping para ICEC
+     */
+    private async retryWithWebScrapingMonitoring(errorList: IErrorService[], tasks: ITask[]): Promise<number> {
+        const browser = await chromium.launch({ headless: false });
 
-        if (values.length < 6) {
-            throw new Error(`Dados ICEC insuficientes. Esperado: 6 valores, Encontrado: ${values.length}`);
+        try {
+            const page = await browser.newPage();
+
+            // Fazer login
+            await this.performLogin(page);
+
+            let sucessosWebScraping = 0;
+
+            for (const error of errorList) {
+                try {
+                    console.log(LogMessages.webScrapingInicio('ICEC', error.regiao, error.mes, error.ano));
+
+                    const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
+                    const savedIds = await this.saveBatchIcecToDatabase([data]);
+
+                    console.log(LogMessages.webScrapingSucesso('ICEC', error.regiao, error.mes, error.ano));
+                    sucessosWebScraping++;
+
+                    // Atualizar task correspondente para sucesso
+                    const taskIndex = tasks.findIndex(t => 
+                        t.mes === error.mes && 
+                        t.ano === error.ano && 
+                        t.regiao === error.regiao && 
+                        t.status === 'Falha'
+                    );
+                    
+                    if (taskIndex !== -1) {
+                        tasks[taskIndex].status = 'Sucesso';
+                        tasks[taskIndex].metodo = Metodo.WS;
+                        delete tasks[taskIndex].erro;
+                    }
+
+                } catch (scrapingError) {
+                    console.log(LogMessages.webScrapingFalha('ICEC', error.regiao, error.mes, error.ano, scrapingError));
+                    
+                    // Atualizar erro na task
+                    const taskIndex = tasks.findIndex(t => 
+                        t.mes === error.mes && 
+                        t.ano === error.ano && 
+                        t.regiao === error.regiao && 
+                        t.status === 'Falha'
+                    );
+                    
+                    if (taskIndex !== -1) {
+                        tasks[taskIndex].erro = `Planilha: ${tasks[taskIndex].erro} | Web Scraping: ${scrapingError}`;
+                    }
+                }
+            }
+
+            console.log(`\n=== Resultado do Web Scraping ICEC ===`);
+            console.log(`Sucessos: ${sucessosWebScraping}`);
+            console.log(`Erros: ${errorList.length - sucessosWebScraping}`);
+            console.log(`Total tentativas: ${errorList.length}`);
+
+            return sucessosWebScraping;
+
+        } finally {
+            await browser.close();
+        }
+    }
+
+    // ========================================
+    // SEÇÃO 6: MÉTODO PRINCIPAL PÚBLICO
+    // ========================================
+
+    /**
+     * Versão com monitoramento do processamento ICEC
+     */
+    public async processAllIcecDataWithMonitoring(regioes: string[] = ['BR']): Promise<IServiceResult> {
+        const startTime = Date.now();
+        console.log('🚀 Iniciando processamento completo dos dados ICEC com monitoramento...\n');
+
+        const resultadoLimpeza = await this.cleanDatabase();
+        console.log(resultadoLimpeza);
+
+        console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
+
+        const periods = generateServicePeriods('ICEC');
+        const tasks: ITask[] = [];
+        let registrosPlanilha = 0;
+        let registrosWebScraping = 0;
+        let erros: IErrorService[] = [];
+
+        // Array para acumular todos os dados ICEC antes de salvar
+        const icecDataList: Icec[] = [];
+
+        for (const period of periods) {
+            for (const regiao of regioes) {
+                try {
+                    console.log(LogMessages.processando('ICEC', regiao, period.mes, period.ano));
+
+                    const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
+                    const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}`);
+
+                    // Extrair dados completos diretamente da planilha
+                    const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
+
+                    const icecData: Icec = {
+                        ...completeData,
+                        MES: period.mes,
+                        ANO: period.ano,
+                        REGIAO: regiao as Regiao
+                    };
+
+                    icecDataList.push(icecData);
+
+                    console.log(LogMessages.sucesso('ICEC', regiao, period.mes, period.ano));
+
+                    tasks.push({
+                        mes: period.mes,
+                        ano: period.ano,
+                        regiao,
+                        status: 'Sucesso',
+                        servico: 'ICEC',
+                        metodo: Metodo.PLA
+                    });
+
+                    registrosPlanilha++;
+
+                } catch (error) {
+                    console.log(LogMessages.erro('ICEC', regiao, period.mes, period.ano, error));
+
+                    tasks.push({
+                        mes: period.mes,
+                        ano: period.ano,
+                        regiao,
+                        status: 'Falha',
+                        servico: 'ICEC',
+                        metodo: Metodo.PLA,
+                        erro: error.toString()
+                    });
+
+                    erros.push({
+                        regiao,
+                        mes: period.mes,
+                        ano: period.ano
+                    });
+                }
+            }
         }
 
-        return {
-            ICEC: String(values[0] || ''),           // Mantendo como string
-            ATÉ_50: String(values[1] || ''),         // Mantendo como string
-            MAIS_DE_50: String(values[2] || ''),     // Mantendo como string
-            SEMIDURAVEIS: String(values[3] || ''),   // Mantendo como string
-            NAO_DURAVEIS: String(values[4] || ''),   // Mantendo como string
-            DURAVEIS: String(values[5] || '')        // Mantendo como string
+        let idsSalvos: string[] = [];
+
+        // Salvar todos os registros ICEC de uma vez
+        if (icecDataList.length > 0) {
+            console.log(`\n💾 Salvando ${icecDataList.length} registros ICEC no banco de dados...`);
+            idsSalvos = await this.saveBatchIcecToDatabase(icecDataList);
+            console.log(`✅ Todos os registros ICEC foram salvos com sucesso!`);
+        }
+
+        // Segunda tentativa com web scraping para os erros
+        if (erros.length > 0) {
+            console.log(`\n🔄 Iniciando segunda tentativa com web scraping para ${erros.length} períodos...`);
+            const sucessosWebScraping = await this.retryWithWebScrapingMonitoring(erros, tasks);
+            registrosWebScraping = sucessosWebScraping;
+        }
+
+        const endTime = Date.now();
+        const tempoExecucao = calculateExecutionTime(startTime, endTime);
+
+        const { sucessos, falhas } = calculateTaskStats(tasks);
+
+        // Extrair períodos dinamicamente
+        const { periodoInicio, periodoFim } = extractServicePeriodRange(periods);
+
+        const resultado: IServiceResult = {
+            servico: 'ICEC',
+            periodoInicio,
+            periodoFim,
+            tempoExecucao,
+            tasks,
+            totalRegistros: tasks.length, // Total geral (sucessos + falhas)
+            registrosPlanilha,
+            registrosWebScraping,
+            sucessos,
+            falhas
         };
+
+        console.log(`\n=== Processamento ICEC concluído ===`);
+        console.log(`Sucessos: ${sucessos}`);
+        console.log(`Falhas: ${falhas}`);
+        console.log(`Tempo: ${Math.round(tempoExecucao / 60)} minutos`);
+        console.log(`Registros por planilha: ${registrosPlanilha}`);
+        console.log(`Registros por web scraping: ${registrosWebScraping}`);
+
+        // Nova etapa: processar metadados para registros do tipo Planilha
+        if (idsSalvos.length) {
+            console.log('\n🔄 Iniciando processamento de metadados ICEC...');
+            await this.processMetadataForPlanilhaRecords(idsSalvos);
+        }
+
+        // Limpeza da pasta temp ao final da execução
+        await cleanupServiceTempFolder('icec', this.TEMP_DIR);
+
+        return resultado;
     }
 }
+

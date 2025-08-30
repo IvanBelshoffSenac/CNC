@@ -69,10 +69,6 @@ export class PeicService {
                 }
             }
 
-            // salvar metadados para debug
-            const debugFilePath = path.join(__dirname, 'peic_debug.json');
-            fs.writeFileSync(debugFilePath, JSON.stringify(allMetadataToSave, null, 2));
-
             // Salvar todos os metadados de uma vez usando saveMany (mais eficiente)
             if (allMetadataToSave.length > 0) {
                 await metadadosPeicRepository.save(allMetadataToSave);
@@ -104,9 +100,6 @@ export class PeicService {
 
             // Usar a função otimizada para extrair dados estruturados
             const peicCompleta = transformJsonToPEIC(jsonData);
-            // Salvar jsonData em um arquivo para debug
-            const debugFilePath = path.join(__dirname, 'peic_debug.json');
-            fs.writeFileSync(debugFilePath, JSON.stringify(peicCompleta, null, 2));
 
             // Converter para o formato MetadadosPeic
             const metadados: MetadadosPeic[] = [];
