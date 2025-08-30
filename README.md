@@ -36,10 +36,14 @@ O sistema utiliza duas abordagens para obtenção dos dados:
 - ✅ Dupla estratégia: Download de planilhas + Web scraping
 - ✅ Processamento para múltiplas regiões (BR, ES, etc.)
 - ✅ Armazenamento em banco de dados MySQL
+- ✅ **Extração e armazenamento de metadados completos** das planilhas
+- ✅ **Processamento inteligente de dados estruturados** de cada pesquisa
+- ✅ **Relacionamento entre dados principais e metadados** via foreign keys
 - ✅ Sistema de notificações por email com próxima execução agendada
 - ✅ Logs detalhados e monitoramento
 - ✅ Limpeza automática de arquivos temporários
 - ✅ Relatórios de execução completos
+- ✅ **Validação e processamento otimizado** de múltiplos formatos de dados
 
 ## 🛠 Tecnologias Utilizadas
 
@@ -364,18 +368,30 @@ CNC/
 │   │   ├── database/
 │   │   │   ├── data-source.ts      # Configuração TypeORM
 │   │   │   ├── entities/           # Entidades do banco
-│   │   │   ├── migrations/         # Migrações
-│   │   │   └── repositories/       # Repositórios
+│   │   │   │   ├── Icec.ts         # Entidade principal ICEC
+│   │   │   │   ├── Icf.ts          # Entidade principal ICF
+│   │   │   │   ├── Peic.ts         # Entidade principal PEIC
+│   │   │   │   ├── MetadadosIcec.ts # Metadados detalhados ICEC
+│   │   │   │   ├── MetadadosIcf.ts  # Metadados detalhados ICF
+│   │   │   │   └── MetadadosPeic.ts # Metadados detalhados PEIC
+│   │   │   ├── migrations/         # Migrações do banco
+│   │   │   └── repositories/       # Repositórios de dados
+│   │   │       ├── icecRepository.ts
+│   │   │       ├── icfRepository.ts
+│   │   │       ├── peicRepository.ts
+│   │   │       ├── metadadosIcecRepository.ts
+│   │   │       ├── metadadosIcfRepository.ts
+│   │   │       └── metadadosPeicRepository.ts
 │   │   ├── scheduler/
 │   │   │   └── orchestrator.ts     # Agendador CRON
 │   │   ├── services/
-│   │   │   ├── icec.ts            # Serviço ICEC
-│   │   │   ├── icf.ts             # Serviço ICF
-│   │   │   ├── peic.ts            # Serviço PEIC
+│   │   │   ├── icec.ts            # Serviço ICEC com extração de metadados
+│   │   │   ├── icf.ts             # Serviço ICF com extração de metadados
+│   │   │   ├── peic.ts            # Serviço PEIC com extração de metadados
 │   │   │   └── notification.ts    # Serviço de notificações
 │   │   ├── shared/
 │   │   │   ├── interfaces.ts      # Interfaces TypeScript
-│   │   │   └── utils.ts           # Utilitários
+│   │   │   └── utils.ts           # Utilitários e transformadores de dados
 │   │   └── tests/                 # Testes e scripts
 │   ├── index.ts                   # Arquivo principal
 │   └── force.ts                   # Execução forçada
@@ -417,9 +433,10 @@ Para cada pesquisa:
 1. **Limpeza do banco** de dados da pesquisa
 2. **Primeira tentativa**: Download direto das planilhas
 3. **Segunda tentativa**: Web scraping para períodos com falha
-4. **Processamento** dos dados extraídos
-5. **Armazenamento** no banco de dados
-6. **Envio de relatório** por email com informações detalhadas:
+4. **Processamento** dos dados extraídos para tabelas principais
+5. **Extração de metadados** automática das planilhas (apenas para método Planilha)
+6. **Armazenamento** no banco de dados (dados principais + metadados)
+7. **Envio de relatório** por email com informações detalhadas:
    - Estatísticas de execução (sucessos, falhas, tempo)
    - Dados por região e método de coleta
    - **📅 Próxima execução agendada** calculada automaticamente
@@ -439,8 +456,18 @@ Para cada pesquisa:
    - Lê primeira aba da planilha
    - Busca linha com "Índice (em Pontos)" (última linha do ICEC)
    - Extrai 6 valores numéricos: ICEC Geral, Até 50, Mais de 50, Semiduráveis, Não Duráveis, Duráveis
-4. **Validação**: Verifica se todos os valores são numéricos válidos
-5. **Armazenamento**: Salva no banco com método "PLA" (Planilha)
+4. **Extração de Metadados Automática**:
+   - **Processamento completo da planilha** usando `transformJsonToICEC()`
+   - **Identificação automática** de todos os tipos de índices e campos
+   - **Extração estruturada** de expectativas, situação atual e índices finais
+   - **Preservação de dados brutos** para todos os subíndices e categorias
+5. **Validação**: Verifica se todos os valores são numéricos válidos
+6. **Armazenamento**: 
+   - Salva dados principais no banco com método "PLA" (Planilha)
+   - **Salva metadados detalhados** na tabela `metadados_icec` com relacionamento
+7. **Otimização**: 
+   - **Processamento em lote** de metadados para alta performance
+   - **Verificação de duplicação** para evitar reprocessamento
 
 #### Método 2: Web Scraping (Fallback)
 1. **Login automático**: Acessa site ICEC com credenciais
@@ -454,7 +481,15 @@ Para cada pesquisa:
    - Busca período target (formato "JUL 25")
    - Extrai valores da linha correspondente
 4. **Processamento**: Converte vírgulas para pontos (formato brasileiro → padrão)
-5. **Armazenamento**: Salva no banco com método "WS" (Web Scraping)
+5. **Armazenamento**: 
+   - Salva no banco com método "WS" (Web Scraping)
+   - **⚠️ Metadados não disponíveis** para registros obtidos via web scraping
+
+**📊 Diferenças nos Metadados ICEC:**
+| Método | Metadados Disponíveis | Detalhes |
+|--------|--------------------|----------|
+| **Planilha (PLA)** | ✅ Completos | Todos os subíndices, expectativas e situação atual |
+| **Web Scraping (WS)** | ❌ Indisponíveis | Apenas valores principais dos índices |
 
 ### 📈 ICF (Índice de Confiança do Consumidor)
 
@@ -483,14 +518,21 @@ Para cada pesquisa:
    NC percentual = ((135,8 - 134,5) / 134,5) × 100 = 0,97%
    ```
 
-4. **Validação rigorosa**:
+4. **Extração de Metadados Avançada** (apenas para planilha atual):
+   - **Processamento completo** usando `transformJsonToICF()`
+   - **Todos os tipos de dados** por categoria e faixa salarial
+   - **Estruturação automática** de expectativas e situação atual
+   - **Preservação de dados originais** da CNC
+
+5. **Validação rigorosa**:
    - **Ambas as planilhas** devem ser baixadas com sucesso
    - **Se uma falhar** → todo o período é marcado como erro
    - **Erro registrado** → será processado por web scraping
 
-5. **Dados finais armazenados**:
+6. **Dados finais armazenados**:
    - **3 valores em pontos** (da planilha atual)
    - **3 valores percentuais** (calculados matematicamente)
+   - **Metadados completos** vinculados ao registro principal
 
 #### Método 2: Web Scraping (Fallback - Sem Cálculo)
 
@@ -514,6 +556,7 @@ Para cada pesquisa:
 | **Complexidade** | Alta | Baixa |
 | **Ponto de falha** | Qualquer planilha indisponível | Instabilidade do site |
 | **Dados obtidos** | Calculados localmente | Pré-calculados pelo CNC |
+| **Metadados disponíveis** | ✅ Completos | ❌ Indisponíveis |
 
 ### 💳 PEIC (Pesquisa de Endividamento e Inadimplência)
 
@@ -526,9 +569,17 @@ Para cada pesquisa:
    - **Endividados**: % e absoluto (milhões)
    - **Contas em atraso**: % e absoluto (milhões) 
    - **Não terão condições de pagar**: % e absoluto (milhões)
-4. **Conversões**:
+4. **Extração de Metadados Completa**:
+   - **Processamento avançado** usando `transformJsonToPEIC()`
+   - **Todos os tipos de endividamento** por categoria
+   - **Dados detalhados** por faixa salarial e região
+   - **Números absolutos** e percentuais estruturados
+5. **Conversões**:
    - Percentuais: Remove % e converte para decimal
    - Absolutos: Converte texto "X,Y milhões" para número
+6. **Armazenamento**:
+   - Dados principais na tabela `peics`
+   - **Metadados detalhados** na tabela `metadados_peic`
 
 #### Método 2: Web Scraping (Fallback)
 1. **Login e navegação**: No site PEIC específico
@@ -539,6 +590,14 @@ Para cada pesquisa:
 3. **Processamento específico**:
    - **Percentuais**: Já vêm sem símbolo % (ex: "45,2")
    - **Absolutos**: Formato "45,2 milhões" → conversão para número
+4. **Armazenamento**:
+   - Apenas dados principais (sem metadados detalhados)
+
+**📊 Diferenças nos Metadados PEIC:**
+| Método | Metadados Disponíveis | Detalhes |
+|--------|--------------------|----------|
+| **Planilha (PLA)** | ✅ Completos | Todas as categorias de endividamento e números absolutos |
+| **Web Scraping (WS)** | ❌ Indisponíveis | Apenas valores principais dos indicadores |
 
 ## 🔄 Fluxo de Fallback Inteligente
 
@@ -561,10 +620,123 @@ Cada pesquisa armazena:
 - **Região**: Código da região (BR, ES, etc.)
 - **Método**: PLA (Planilha) ou WS (Web Scraping)
 - **Dados específicos** de cada pesquisa
+- **Metadados detalhados** (quando coletados via planilha)
+
+## 📊 Sistema de Metadados Avançado
+
+O sistema implementa um mecanismo sofisticado de extração e armazenamento de metadados que captura **todos os dados estruturados** presentes nas planilhas oficiais da CNC, não apenas os valores principais dos índices.
+
+### 🔍 Funcionalidades dos Metadados
+
+#### ✅ Extração Automática Inteligente
+- **Processamento completo** de todas as seções das planilhas Excel
+- **Identificação automática** de tipos de índices e campos
+- **Preservação da estrutura** original dos dados da CNC
+- **Validação e formatação** adequada para armazenamento
+
+#### ✅ Armazenamento Estruturado
+- **Tabelas separadas** para metadados de cada pesquisa
+- **Relacionamento direto** via foreign keys com dados principais
+- **Dados brutos preservados** como strings para máxima fidelidade
+- **Timestamps** de inserção para auditoria
+
+#### ✅ Cobertura Completa de Dados
+- **ICEC**: Todos os subíndices, categorias e valores detalhados
+- **ICF**: Dados completos de pontos e percentuais por categoria
+- **PEIC**: Informações detalhadas de endividamento e inadimplência
+
+### 🗄️ Estrutura de Metadados por Pesquisa
+
+#### 📊 ICEC - Metadados (Tabela: `metadados_icec`)
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `TIPOINDICE` | TEXT | Tipo do índice (ex: "Índice de Confiança", "Expectativas") |
+| `CAMPO` | TEXT | Campo específico (ex: "Índice (em Pontos)", "Situação Atual") |
+| `TOTAL` | TEXT | Valor total/geral |
+| `EMPRESAS_COM_ATÉ_50_EMPREGADOS` | TEXT | Dados para empresas pequenas |
+| `EMPRESAS_COM_MAIS_DE_50_EMPREGADOS` | TEXT | Dados para empresas grandes |
+| `SEMIDURAVEIS` | TEXT | Setor de bens semiduráveis |
+| `NAO_DURAVEIS` | TEXT | Setor de bens não duráveis |
+| `DURAVEIS` | TEXT | Setor de bens duráveis |
+| `INDICE` | BOOLEAN | Se é um valor de índice principal |
+| `icec_id` | UUID | Relacionamento com registro ICEC |
+
+#### 📈 ICF - Metadados (Tabela: `metadados_icf`)
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `TIPOINDICE` | TEXT | Tipo do índice ICF |
+| `CAMPO` | TEXT | Campo específico do índice |
+| `TOTAL` | TEXT | Valor total/nacional |
+| `ATE_10_SM` | TEXT | Consumidores até 10 salários mínimos |
+| `MAIS_DE_10_SM` | TEXT | Consumidores acima de 10 salários mínimos |
+| `INDICE` | BOOLEAN | Se é um valor de índice principal |
+| `icf_id` | UUID | Relacionamento com registro ICF |
+
+#### 💳 PEIC - Metadados (Tabela: `metadados_peic`)
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `TIPOINDICE` | TEXT | Tipo de indicador PEIC |
+| `CAMPO` | TEXT | Campo específico do indicador |
+| `TOTAL` | TEXT | Valor total/nacional |
+| `ATE_10_SM` | TEXT | Famílias até 10 salários mínimos |
+| `MAIS_DE_10_SM` | TEXT | Famílias acima de 10 salários mínimos |
+| `NUMERO_ABSOLUTO` | TEXT | Valores absolutos em milhões |
+| `peic_id` | UUID | Relacionamento com registro PEIC |
+
+### 🔄 Processo de Extração de Metadados
+
+#### 1. Identificação Automática
+- **Localização de planilhas** já baixadas na pasta temporária
+- **Verificação de existência** de metadados para evitar duplicação
+- **Processamento inteligente** da estrutura da planilha
+
+#### 2. Transformação de Dados
+- **Funções especializadas**: `transformJsonToICEC()`, `transformJsonToICF()`, `transformJsonToPEIC()`
+- **Parsing otimizado** de células Excel para estruturas tipadas
+- **Validação de dados** antes do armazenamento
+
+#### 3. Armazenamento Otimizado
+- **Operações em lote** para alta performance
+- **Verificação de integridade** referencial
+- **Logs detalhados** do processo de extração
+
+### 📋 Características Técnicas
+
+#### ✅ Performance Otimizada
+- **Processamento em lote** de múltiplos registros
+- **Consultas otimizadas** para verificação de existência
+- **Cleanup automático** de recursos temporários
+
+#### ✅ Integridade de Dados
+- **Foreign keys** garantem relacionamento consistente
+- **Dados brutos preservados** como TEXT para flexibilidade
+- **Cascade delete** para manutenção automática
+
+#### ✅ Monitoramento Completo
+- **Logs específicos** para cada etapa do processo
+- **Contadores de sucessos** e falhas de metadados
+- **Integração com relatórios** de execução por email
+
+### 🎯 Casos de Uso dos Metadados
+
+#### 📊 Análise Histórica Detalhada
+- **Comparação temporal** de todos os subíndices
+- **Análise de tendências** por categoria específica
+- **Drill-down** em dados que não aparecem nos índices principais
+
+#### 📈 Relatórios Avançados
+- **Relatórios customizados** com dados granulares
+- **Dashboards detalhados** para diferentes categorias
+- **Exportação** de dados estruturados completos
+
+#### 🔍 Auditoria e Compliance
+- **Rastreabilidade completa** da origem dos dados
+- **Validação** contra fontes oficiais
+- **Histórico de modificações** e atualizações
 
 ## 📊 Dados Coletados por Pesquisa
 
-### 🔍 ICEC (Tabela: `icec`)
+### 🔍 ICEC (Tabela: `icecs`)
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | `ICEC` | DECIMAL(5,1) | Índice Geral de Confiança |
@@ -577,6 +749,7 @@ Cada pesquisa armazena:
 | `ANO` | INT | Ano da pesquisa |
 | `REGIAO` | VARCHAR(5) | Código da região (BR, ES, etc.) |
 | `METODO` | ENUM | PLA (Planilha) ou WS (Web Scraping) |
+| `metadados` | OneToMany | Relacionamento com `metadados_icec` |
 
 **Exemplo de dados ICEC:**
 ```json
@@ -590,11 +763,12 @@ Cada pesquisa armazena:
   "MES": 7,
   "ANO": 2024,
   "REGIAO": "BR",
-  "METODO": "PLA"
+  "METODO": "PLA",
+  "metadados": [] // Array com todos os metadados detalhados
 }
 ```
 
-### 📈 ICF (Tabela: `icf`)
+### 📈 ICF (Tabela: `icfs`)
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | `NC_PONTOS` | DECIMAL(5,1) | Nacional Comércio em pontos |
@@ -607,6 +781,7 @@ Cada pesquisa armazena:
 | `ANO` | INT | Ano da pesquisa |
 | `REGIAO` | VARCHAR(5) | Código da região |
 | `METODO` | ENUM | PLA ou WS |
+| `metadados` | OneToMany | Relacionamento com `metadados_icf` |
 
 **Exemplo de dados ICF:**
 ```json
@@ -620,11 +795,12 @@ Cada pesquisa armazena:
   "MES": 2,
   "ANO": 2024,
   "REGIAO": "BR",
-  "METODO": "WS"
+  "METODO": "WS",
+  "metadados": [] // Array com todos os metadados detalhados
 }
 ```
 
-### 💳 PEIC (Tabela: `peic`)
+### 💳 PEIC (Tabela: `peics`)
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | `ENDIVIDADOS_PERCENTUAL` | DECIMAL(5,1) | % de famílias endividadas |
@@ -637,6 +813,7 @@ Cada pesquisa armazena:
 | `ANO` | INT | Ano da pesquisa |
 | `REGIAO` | VARCHAR(5) | Código da região |
 | `METODO` | ENUM | PLA ou WS |
+| `metadados` | OneToMany | Relacionamento com `metadados_peic` |
 
 **Exemplo de dados PEIC:**
 ```json
@@ -650,7 +827,8 @@ Cada pesquisa armazena:
   "MES": 7,
   "ANO": 2024,
   "REGIAO": "ES",
-  "METODO": "PLA"
+  "METODO": "PLA",
+  "metadados": [] // Array com todos os metadados detalhados
 }
 ```
 
@@ -677,6 +855,18 @@ npx playwright install
 - Verifique configurações SMTP no `.env`
 - Teste manualmente enviando um email de relatório
 
+#### 5. Metadados não estão sendo processados
+- **Metadados só são extraídos** para registros obtidos via planilha (método PLA)
+- **Web scraping não gera metadados** - comportamento normal
+- Verifique logs para mensagens: `"🔄 Iniciando processamento de metadados"`
+- **Metadados existentes** não são reprocessados - evita duplicação
+- Se necessário, limpe tabelas de metadados para reprocessar
+
+#### 6. Problemas com relacionamentos de dados
+- **Verificação de integridade**: Foreign keys garantem consistência
+- **Cascade delete**: Metadados são removidos automaticamente ao excluir registro principal
+- **Logs de relacionamento**: Procure por mensagens de `icec_id`, `icf_id`, `peic_id` não encontrados
+
 ### Logs e Monitoramento
 
 O sistema gera logs detalhados:
@@ -688,28 +878,84 @@ O sistema gera logs detalhados:
 ### Verificação de Funcionamento
 
 1. **Teste individual de serviços**: Execute scripts de teste em `src/server/tests/`
-2. **Monitoramento de dados**: Verifique tabelas no banco após execução
+2. **Monitoramento de dados**: 
+   - Verifique tabelas principais (`icecs`, `icfs`, `peics`) após execução
+   - **Verifique tabelas de metadados** (`metadados_icec`, `metadados_icf`, `metadados_peic`)
+   - **Validação de relacionamentos**: Confirme foreign keys entre tabelas principais e metadados
 3. **Emails de relatório**: Confirme recebimento dos relatórios automáticos
+4. **Logs de metadados**: Procure por mensagens específicas:
+   - `"📊 Encontrados X registros do tipo Planilha"`
+   - `"📥 Processando metadados para período..."`
+   - `"✅ Metadados preparados para ID: X"`
+   - `"📊 Total de metadados salvos: X"`
+
+### Consultas SQL Úteis para Verificação
+
+#### Verificar dados com metadados:
+```sql
+-- ICEC com metadados
+SELECT i.*, COUNT(m.id) as total_metadados 
+FROM icecs i 
+LEFT JOIN metadados_icec m ON i.id = m.icec_id 
+GROUP BY i.id;
+
+-- ICF com metadados  
+SELECT i.*, COUNT(m.id) as total_metadados 
+FROM icfs i 
+LEFT JOIN metadados_icf m ON i.id = m.icf_id 
+GROUP BY i.id;
+
+-- PEIC com metadados
+SELECT p.*, COUNT(m.id) as total_metadados 
+FROM peics p 
+LEFT JOIN metadados_peic m ON p.id = m.peic_id 
+GROUP BY p.id;
+```
+
+#### Verificar integridade dos relacionamentos:
+```sql
+-- Metadados órfãos (sem registro principal)
+SELECT COUNT(*) FROM metadados_icec 
+WHERE icec_id NOT IN (SELECT id FROM icecs);
+```
 
 ## 📊 Dados Coletados
 
 ### ICEC (Índice de Confiança do Empresário do Comércio)
-- ICEC Geral
-- Até 50 funcionários
-- Mais de 50 funcionários
-- Semiduráveis
-- Não duráveis
-- Duráveis
+- **Dados Principais**:
+  - ICEC Geral
+  - Até 50 funcionários
+  - Mais de 50 funcionários
+  - Semiduráveis
+  - Não duráveis
+  - Duráveis
+- **Metadados Detalhados** (via planilha):
+  - Expectativas empresariais por categoria
+  - Situação atual por setor
+  - Índices detalhados por tamanho de empresa
+  - Dados de confiança por tipo de bem comercializado
 
 ### ICF (Índice de Confiança do Consumidor)
-- NC (Nacional Comércio) - Pontos e Percentual
-- Até 10 SM (Salários Mínimos) - Pontos e Percentual
-- Mais de 10 SM - Pontos e Percentual
+- **Dados Principais**:
+  - NC (Nacional Comércio) - Pontos e Percentual
+  - Até 10 SM (Salários Mínimos) - Pontos e Percentual
+  - Mais de 10 SM - Pontos e Percentual
+- **Metadados Detalhados** (via planilha):
+  - Índices de confiança por faixa de renda
+  - Expectativas econômicas dos consumidores
+  - Situação financeira atual por categoria
+  - Variações históricas detalhadas
 
 ### PEIC (Pesquisa de Endividamento e Inadimplência)
-- Endividados - Percentual e Absoluto
-- Contas em atraso - Percentual e Absoluto
-- Não terão condições de pagar - Percentual e Absoluto
+- **Dados Principais**:
+  - Endividados - Percentual e Absoluto
+  - Contas em atraso - Percentual e Absoluto
+  - Não terão condições de pagar - Percentual e Absoluto
+- **Metadados Detalhados** (via planilha):
+  - Endividamento por tipo de dívida
+  - Inadimplência por faixa salarial
+  - Perfil socioeconômico dos endividados
+  - Números absolutos regionais detalhados
 
 ## 📧 Sistema de Notificações
 
@@ -825,8 +1071,19 @@ Para dúvidas ou problemas:
 1. Verifique os logs da aplicação
 2. Consulte este README
 3. Execute os scripts de teste
-4. Entre em contato com o time de desenvolvimento
+4. **Verifique integridade dos metadados** usando as consultas SQL fornecidas
+5. Entre em contato com o time de desenvolvimento
+
+## 🚀 Próximas Funcionalidades
+
+- 📊 Dashboard web para visualização de dados e metadados
+- 📈 API REST para consulta de dados históricos
+- 🔍 Sistema de busca avançada nos metadados
+- 📱 Interface mobile para monitoramento
+- 📋 Relatórios customizados com dados granulares
 
 ---
 
 **Desenvolvido para Fecomercio-ES | Sistema CNC de Coleta Automática de Dados**
+
+*Versão com Sistema Avançado de Metadados - Captura e preserva todos os dados estruturados das pesquisas oficiais da CNC*
