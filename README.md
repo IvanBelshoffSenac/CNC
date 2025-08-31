@@ -33,6 +33,7 @@ O sistema utiliza duas abordagens para obtenção dos dados:
 
 - ✅ Coleta automatizada de dados históricos (Janeiro/2010 até presente)
 - ✅ Agendamento automático via CRON (configurável via variáveis de ambiente)
+- ✅ **Controle granular de execução** (habilitar/desabilitar serviços individualmente)
 - ✅ Dupla estratégia: Download de planilhas + Web scraping
 - ✅ Processamento para múltiplas regiões (BR, ES, etc.)
 - ✅ Armazenamento em banco de dados MySQL
@@ -44,6 +45,7 @@ O sistema utiliza duas abordagens para obtenção dos dados:
 - ✅ Limpeza automática de arquivos temporários
 - ✅ Relatórios de execução completos
 - ✅ **Validação e processamento otimizado** de múltiplos formatos de dados
+- ✅ **Proteção contra execuções desnecessárias** quando todos os serviços estão desabilitados
 
 ## 🛠 Tecnologias Utilizadas
 
@@ -337,6 +339,20 @@ SCHEDULE_ICF="0 0 10 1,15 * *"
 | `SCHEDULE_ICF` | Agendamento para coleta ICF | `"0 5 1 * *"` | `"0 45 16 15 * *"` |
 | `SCHEDULE_PEIC` | Agendamento para coleta PEIC | `"0 8 1 * *"` | `"0 0 */6 * *"` |
 
+### Configurações de Controle de Execução (Tabela de Referência)
+
+| Variável | Descrição | Valor Padrão | Funcionalidade |
+|----------|-----------|--------------|----------------|
+| `ENABLED_ICEC` | Controla execução da coleta ICEC | `true` | Habilita/desabilita ICEC |
+| `ENABLED_ICF` | Controla execução da coleta ICF | `true` | Habilita/desabilita ICF |
+| `ENABLED_PEIC` | Controla execução da coleta PEIC | `true` | Habilita/desabilita PEIC |
+
+**🎯 Comportamento do Sistema:**
+- **Se `undefined`**: Considera como `true` (habilitado)
+- **Se `true`**: Serviço é executado normalmente
+- **Se `false`**: Serviço é ignorado em execuções automáticas e forçadas
+- **Validação**: Se todos estiverem `false`, aplicação não executa
+
 ### Configurações de Email
 
 | Variável | Descrição |
@@ -346,6 +362,29 @@ SCHEDULE_ICF="0 0 10 1,15 * *"
 | `MAIL_USERNAME` | Email remetente |
 | `MAIL_PASSWORD` | Senha do email |
 | `NOTIFICATION_EMAIL` | Email(s) destinatário(s) - suporte a múltiplos separados por vírgula |
+
+### Configurações de Controle de Execução
+
+| Variável | Descrição | Valores | Padrão |
+|----------|-----------|---------|--------|
+| `ENABLED_ICEC` | Habilita/desabilita coleta ICEC | `true` ou `false` | `true` |
+| `ENABLED_ICF` | Habilita/desabilita coleta ICF | `true` ou `false` | `true` |
+| `ENABLED_PEIC` | Habilita/desabilita coleta PEIC | `true` ou `false` | `true` |
+
+**🎯 Funcionalidades do Controle de Execução:**
+- **Desabilitação granular**: Controle individual de cada pesquisa
+- **Agendamentos dinâmicos**: Apenas serviços habilitados são agendados
+- **Execução forçada respeitada**: `npm run force` também obedece essas configurações
+- **Logs informativos**: Sistema exibe quais serviços estão habilitados/desabilitados
+- **Proteção contra execução vazia**: Se todos estiverem desabilitados, aplicação não executa
+
+**Exemplo de configuração seletiva:**
+```env
+# Coletar apenas ICEC e PEIC (desabilitar ICF)
+ENABLED_ICEC=true
+ENABLED_ICF=false
+ENABLED_PEIC=true
+```
 
 ## 📜 Scripts Disponíveis
 
@@ -418,12 +457,18 @@ O sistema executa automaticamente conforme configurações CRON definidas:
 - Formato CRON: `"segundo minuto hora dia mês dia_da_semana"`
 - Exemplos: `"0 30 14 * * 1"` (toda segunda às 14:30), `"0 0 */6 * *"` (a cada 6 horas)
 
+**🎯 Controle de Execução:**
+- **Habilitar/Desabilitar**: Use `ENABLED_ICEC`, `ENABLED_ICF`, `ENABLED_PEIC` no `.env`
+- **Execução seletiva**: Apenas serviços habilitados (`true`) são executados
+- **Agendamentos inteligentes**: Serviços desabilitados não são agendados
+- **Proteção de execução vazia**: Se todos estiverem desabilitados, aplicação não executa
+
 **Logs de Inicialização:**
 ```
 ⚡ Configurações de agendamento:
-   • ICEC: 0 2 1 * * (padrão)
-   • ICF:  0 30 14 * * 1 (customizado)
-   • PEIC: 0 0 */6 * * (customizado)
+   • ICEC: 0 2 1 * * (padrão) - ✅ Habilitado
+   • ICF:  0 30 14 * * 1 (customizado) - ❌ Desabilitado
+   • PEIC: 0 0 */6 * * (customizado) - ✅ Habilitado
 ```
 
 ### 2. Processo de Coleta
@@ -493,45 +538,37 @@ Para cada pesquisa:
 
 ### 📈 ICF (Índice de Confiança do Consumidor)
 
-#### Método 1: Download Direto de Planilha (Processo Complexo)
+#### Método 1: Download Direto de Planilha (Processo Simplificado)
 
-**⚠️ Diferencial ICF**: Requer download de **duas planilhas separadas** e cálculo matemático.
+1. **Download de uma planilha**:
+   - **Planilha única**: `{BASE_URL}/{MES}_{ANO}/ICF/{REGIAO}.xls`
+   - **Exemplo**: Para março/2024 → baixa apenas `3_2024/ICF/BR.xls`
 
-1. **Download de duas planilhas**:
-   - **Planilha atual**: `{BASE_URL}/{MES}_{ANO}/ICF/{REGIAO}.xls`
-   - **Planilha anterior**: `{BASE_URL}/{MES_ANTERIOR}_{ANO_ANTERIOR}/ICF/{REGIAO}.xls`
-   - **Exemplo**: Para março/2024 → baixa `3_2024` e `2_2024`
+2. **Extração de dados estruturada**:
+   - **Linha "Índice (Em Pontos)"**: Extrai valores em pontos (NC, Até 10 SM, Mais de 10 SM)
+   - **Linha "Índice (Variação Mensal)"**: Extrai percentuais **já calculados** pela CNC
+   - **Processamento direto**: Não há necessidade de cálculos adicionais
 
-2. **Extração de dados**:
-   - **Planilha atual**: Extrai valores em pontos (NC, Até 10 SM, Mais de 10 SM)
-   - **Planilha anterior**: Extrai valores em pontos do período anterior
-   - **Busca seção**: "Índice (em Pontos)" em ambas as planilhas
-
-3. **Cálculo de variação percentual**:
+3. **Estrutura da planilha otimizada**:
    ```
-   Percentual = ((Valor_Atual - Valor_Anterior) / Valor_Anterior) × 100
-   ```
-   **Exemplo prático**:
-   ```
-   NC atual: 135,8 pontos
-   NC anterior: 134,5 pontos
-   NC percentual = ((135,8 - 134,5) / 134,5) × 100 = 0,97%
+   Índice (Em Pontos)       | 135,8 | 134,1 | 146,1
+   Índice (Variação Mensal) |  0,2  |  0,5  | -1,8
    ```
 
-4. **Extração de Metadados Avançada** (apenas para planilha atual):
+4. **Extração de Metadados Avançada**:
    - **Processamento completo** usando `transformJsonToICF()`
    - **Todos os tipos de dados** por categoria e faixa salarial
    - **Estruturação automática** de expectativas e situação atual
    - **Preservação de dados originais** da CNC
 
-5. **Validação rigorosa**:
-   - **Ambas as planilhas** devem ser baixadas com sucesso
-   - **Se uma falhar** → todo o período é marcado como erro
-   - **Erro registrado** → será processado por web scraping
+5. **Validação simplificada**:
+   - **Uma única planilha** deve ser baixada com sucesso
+   - **Se falhar** → período é processado por web scraping
+   - **Dados mais confiáveis** diretamente da fonte oficial
 
 6. **Dados finais armazenados**:
-   - **3 valores em pontos** (da planilha atual)
-   - **3 valores percentuais** (calculados matematicamente)
+   - **3 valores em pontos** (linha "Índice Em Pontos")
+   - **3 valores percentuais** (linha "Variação Mensal" - pré-calculados)
    - **Metadados completos** vinculados ao registro principal
 
 #### Método 2: Web Scraping (Fallback - Sem Cálculo)
@@ -548,15 +585,15 @@ Para cada pesquisa:
    - Separa valores de pontos (colunas 1-3) dos percentuais (colunas 4-6)
    - Converte formato brasileiro para padrão internacional
 
-**📊 Resumo das Diferenças ICF:**
+**📊 Características ICF:**
 | Aspecto | Método Planilha | Método Web Scraping |
 |---------|----------------|-------------------|
-| **Planilhas necessárias** | 2 (atual + anterior) | 0 (acesso direto ao site) |
-| **Cálculo matemático** | ✅ Necessário | ❌ Não necessário |
-| **Complexidade** | Alta | Baixa |
-| **Ponto de falha** | Qualquer planilha indisponível | Instabilidade do site |
-| **Dados obtidos** | Calculados localmente | Pré-calculados pelo CNC |
-| **Metadados disponíveis** | ✅ Completos | ❌ Indisponíveis |
+| **Arquivos processados** | 1 planilha Excel | Dados direto do site |
+| **Processamento** | Leitura direta dos valores | Extração da tabela web |
+| **Dados obtidos** | Pré-calculados pela CNC | Pré-calculados pela CNC |
+| **Metadados** | ✅ Completos | ❌ Indisponíveis |
+| **Confiabilidade** | Alta (fonte oficial) | Alta (mesmo site CNC) |
+| **Dependência** | Disponibilidade da planilha | Estabilidade do site |
 
 ### 💳 PEIC (Pesquisa de Endividamento e Inadimplência)
 
@@ -862,10 +899,16 @@ npx playwright install
 - **Metadados existentes** não são reprocessados - evita duplicação
 - Se necessário, limpe tabelas de metadados para reprocessar
 
-#### 6. Problemas com relacionamentos de dados
-- **Verificação de integridade**: Foreign keys garantem consistência
-- **Cascade delete**: Metadados são removidos automaticamente ao excluir registro principal
-- **Logs de relacionamento**: Procure por mensagens de `icec_id`, `icf_id`, `peic_id` não encontrados
+#### 7. Sistema não executa nenhum serviço
+- **Verifique as variáveis** `ENABLED_ICEC`, `ENABLED_ICF`, `ENABLED_PEIC` no `.env`
+- **Pelo menos um serviço** deve estar configurado como `true`
+- **Se todos estiverem `false`** → aplicação encerra automaticamente
+- **Logs informativos**: Procure por `"❌ === TODOS OS SERVIÇOS ESTÃO DESABILITADOS ==="`
+
+#### 8. Agendamentos não funcionam
+- **Serviços desabilitados** não são agendados automaticamente
+- **Verifique os logs** na inicialização para confirmar quais serviços estão habilitados
+- **Configure adequadamente** as variáveis ENABLED_* no `.env`
 
 ### Logs e Monitoramento
 
