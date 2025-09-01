@@ -30,6 +30,9 @@ export class MetadadosIcec {
     @Column({ type: 'text', nullable: false })
     DURAVEIS: string
 
+    @Column({ type: 'text', nullable: false })
+    TIPOPESQUISA: string
+
     @Column({ type: 'boolean', nullable: false })
     INDICE: boolean
 

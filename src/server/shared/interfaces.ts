@@ -112,6 +112,7 @@ export interface icecXLSXSubtipos {
     semiduraveis: string;
     nao_duraveis: string;
     duraveis: string;
+    tipopesquisa: string;
 }
 
 export interface icecXLSXTipo {

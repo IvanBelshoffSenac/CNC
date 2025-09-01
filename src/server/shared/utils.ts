@@ -115,7 +115,7 @@ export async function cleanupTempFiles(filePaths: string[]): Promise<void> {
  * @param serviceName Nome do serviço (icf, icec, peic)
  * @param tempDir Caminho da pasta temp
  */
-export async function cleanupServiceTempFolder(serviceName: string, tempDir: string): Promise<void> {
+export async function cleanupServiceTempFolder(serviceName: 'icf' | 'icec' | 'peic' | 'all', tempDir: string): Promise<void> {
     try {
         console.log(`🧹 Iniciando limpeza da pasta temp para ${serviceName.toUpperCase()}...`);
 
@@ -126,19 +126,28 @@ export async function cleanupServiceTempFolder(serviceName: string, tempDir: str
 
         const files = await fs.readdir(tempDir);
 
-        // Filtrar apenas arquivos do serviço específico
-        const servicePattern = new RegExp(`^${serviceName.toLowerCase()}_`, 'i');
-        const serviceFiles = files.filter(file =>
-            servicePattern.test(file) &&
-            (file.endsWith('.xls') || file.endsWith('.xlsx'))
-        );
+        let serviceFiles: string[];
+
+        if (serviceName === 'all') {
+            // Para 'all', remover todos os arquivos .xls e .xlsx
+            serviceFiles = files.filter(file =>
+                file.endsWith('.xls') || file.endsWith('.xlsx')
+            );
+        } else {
+            // Filtrar apenas arquivos do serviço específico
+            const servicePattern = new RegExp(`^${serviceName.toLowerCase()}_`, 'i');
+            serviceFiles = files.filter(file =>
+                servicePattern.test(file) &&
+                (file.endsWith('.xls') || file.endsWith('.xlsx'))
+            );
+        }
 
         if (serviceFiles.length === 0) {
-            console.log(`📄 Nenhum arquivo temporário do ${serviceName.toUpperCase()} encontrado`);
+            console.log(`📄 Nenhum arquivo temporário ${serviceName === 'all' ? 'encontrado' : `do ${serviceName.toUpperCase()} encontrado`}`);
             return;
         }
 
-        console.log(`📄 Encontrados ${serviceFiles.length} arquivo(s) temporário(s) do ${serviceName.toUpperCase()}`);
+        console.log(`📄 Encontrados ${serviceFiles.length} arquivo(s) temporário(s) ${serviceName === 'all' ? 'na pasta temp' : `do ${serviceName.toUpperCase()}`}`);
 
         let removedCount = 0;
         for (const file of serviceFiles) {
@@ -452,9 +461,9 @@ export function transformJsonToPEIC(jsonData: any[][]): peicXLSXCompleta {
         // Verifica se é uma linha de cabeçalho (nova categoria)
         // Para PEIC normal: "total - %" | "até 10sm - %" | "mais de 10sm - %"
         // Para PEIC (Sintese): "Numero Absoluto" | null | null
-        const isNormalHeader = row[1] === "total - %" && row[2] === "até 10sm - %" && 
-                              row[3] && row[3].includes("mais de 10sm");
-        
+        const isNormalHeader = row[1] === "total - %" && row[2] === "até 10sm - %" &&
+            row[3] && row[3].includes("mais de 10sm");
+
         const isSinteseHeader = row[1] === "Numero Absoluto" && row[2] === null && row[3] === null;
 
         if (isNormalHeader || isSinteseHeader) {
@@ -552,10 +561,23 @@ export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
 export function transformJsonToICEC(jsonData: any[][]): icecXLSXCompleta {
     const result: icecXLSXTipo[] = [];
     let currentTipo: icecXLSXTipo | null = null;
+    let currentTipoPesquisa: string = '';
 
     // Função helper para verificar se é a primeira linha inválida (com nulls e "Porte")
     const isInvalidFirstLine = (row: any[]): boolean => {
         return row[0] === null && row[1] === null && row[2] === "Porte";
+    };
+
+    // Função para extrair o tipo de pesquisa da coluna 7 do cabeçalho
+    const extractTipoPesquisa = (row: any[]): string => {
+        if (row[7] && typeof row[7] === 'string') {
+            const text = row[7].toString();
+            if (text.includes('ICAEC')) return 'ICAEC';
+            if (text.includes('IEEC')) return 'IEEC';
+            if (text.includes('IIEC')) return 'IIEC';
+            if (text.includes('ICEC')) return 'ICEC';
+        }
+        return currentTipoPesquisa; // Mantém o tipo anterior se não encontrar
     };
 
     for (let i = 0; i < jsonData.length; i++) {
@@ -578,17 +600,20 @@ export function transformJsonToICEC(jsonData: any[][]): icecXLSXCompleta {
                 result.push(currentTipo);
             }
 
+            // Extrai o tipo de pesquisa do cabeçalho
+            currentTipoPesquisa = extractTipoPesquisa(row);
+
             // Cria novo tipo (usar apenas o nome da categoria, ignorando qualquer título de índice na coluna 7)
             currentTipo = {
                 tipo: row[0],
                 valores: []
             };
         } else if (currentTipo && row[0] && row[1] !== undefined) {
-            
+
             // Verifica se é um índice verdadeiro
             const isIndice = (row[0] === "Índice" || row[0] === "Índice (em Pontos)");
 
-            // Adiciona o valor (seja índice ou não)
+            // Adiciona o valor (seja índice ou não) com o tipo de pesquisa atual
             currentTipo.valores.push({
                 tipo: row[0],
                 indice: isIndice,
@@ -597,7 +622,8 @@ export function transformJsonToICEC(jsonData: any[][]): icecXLSXCompleta {
                 "Empresas com mais de 50 empregados": row[3] || '',
                 semiduraveis: row[4] || '',
                 nao_duraveis: row[5] || '',
-                duraveis: row[6] || ''
+                duraveis: row[6] || '',
+                tipopesquisa: currentTipoPesquisa
             });
         }
     }

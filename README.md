@@ -6,6 +6,7 @@ Este projeto é um sistema automatizado para coleta, processamento e armazenamen
 
 - [Sobre o Projeto](#sobre-o-projeto)
 - [Funcionalidades](#funcionalidades)
+- [Estrutura de Dados e Metadados](#estrutura-de-dados-e-metadados)
 - [Tecnologias Utilizadas](#tecnologias-utilizadas)
 - [Pré-requisitos](#pré-requisitos)
 - [Instalação](#instalação)
@@ -37,9 +38,13 @@ O sistema utiliza duas abordagens para obtenção dos dados:
 - ✅ Dupla estratégia: Download de planilhas + Web scraping
 - ✅ Processamento para múltiplas regiões (BR, ES, etc.)
 - ✅ Armazenamento em banco de dados MySQL
-- ✅ **Extração e armazenamento de metadados completos** das planilhas
+- ✅ **Extração e armazenamento de metadados completos** das planilhas Excel
 - ✅ **Processamento inteligente de dados estruturados** de cada pesquisa
 - ✅ **Relacionamento entre dados principais e metadados** via foreign keys
+- ✅ **Metadados específicos por pesquisa** com campos únicos para cada tipo de análise
+  - **ICEC**: Inclui campos `TIPOPESQUISA` e `INDICE` para categorização avançada
+  - **ICF**: Inclui campo `INDICE` para identificação de tipos de dados
+  - **PEIC**: Inclui campo `NUMERO_ABSOLUTO` para valores absolutos complementares
 - ✅ Sistema de notificações por email com próxima execução agendada
 - ✅ Logs detalhados e monitoramento
 - ✅ Limpeza automática de arquivos temporários
@@ -47,7 +52,82 @@ O sistema utiliza duas abordagens para obtenção dos dados:
 - ✅ **Validação e processamento otimizado** de múltiplos formatos de dados
 - ✅ **Proteção contra execuções desnecessárias** quando todos os serviços estão desabilitados
 
+## 📊 Estrutura de Dados e Metadados
+
+O sistema armazena tanto os dados principais das pesquisas quanto metadados detalhados extraídos das planilhas Excel.
+
+### Estrutura dos Dados Principais
+
+#### ICEC (Índice de Confiança do Empresário do Comércio)
+- **ICEC**: Índice geral
+- **ATÉ_50**: Empresas com até 50 empregados
+- **MAIS_DE_50**: Empresas com mais de 50 empregados
+- **SEMIDURAVEIS**: Setor de bens semiduraveis
+- **NAO_DURAVEIS**: Setor de bens não duráveis
+- **DURAVEIS**: Setor de bens duráveis
+
+#### ICF (Índice de Confiança do Consumidor)
+- **NC_PONTOS/NC_PERCENTUAL**: Nível de Confiança (pontos e percentual)
+- **ATE_10_SM_PONTOS/ATE_10_SM_PERCENTUAL**: Até 10 salários mínimos
+- **MAIS_DE_10_SM_PONTOS/MAIS_DE_10_SM_PERCENTUAL**: Mais de 10 salários mínimos
+
+#### PEIC (Pesquisa de Endividamento e Inadimplência do Consumidor)
+- **ENDIVIDADOS_PERCENTUAL/ENDIVIDADOS_ABSOLUTO**: Percentual e números absolutos de endividados
+- **CONTAS_EM_ATRASO_PERCENTUAL/CONTAS_EM_ATRASO_ABSOLUTO**: Contas em atraso
+- **NAO_TERÃO_CONDICOES_DE_PAGAR_PERCENTUAL/NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO**: Sem condições de pagamento
+
+### Estrutura dos Metadados
+
+#### Metadados ICEC
+Campos específicos para análise detalhada:
+- **TIPOINDICE**: Tipo do índice (ex: "Situação Atual dos Negócios", "Expectativas")
+- **CAMPO**: Campo específico da análise
+- **TOTAL**: Valor total
+- **EMPRESAS_COM_ATÉ_50_EMPREGADOS**: Dados para empresas menores
+- **EMPRESAS_COM_MAIS_DE_50_EMPREGADOS**: Dados para empresas maiores
+- **SEMIDURAVEIS**: Dados do setor semiduraveis
+- **NAO_DURAVEIS**: Dados do setor não duráveis
+- **DURAVEIS**: Dados do setor duráveis
+- **TIPOPESQUISA**: Tipo de pesquisa específica *(novo campo)*
+- **INDICE**: Flag indicando se é um índice (boolean) *(novo campo)*
+
+#### Metadados ICF
+Campos específicos para análise de consumidor:
+- **TIPOINDICE**: Tipo do índice
+- **CAMPO**: Campo específico da análise
+- **TOTAL**: Valor total
+- **ATE_10_SM**: Dados para até 10 salários mínimos
+- **MAIS_DE_10_SM**: Dados para mais de 10 salários mínimos
+- **INDICE**: Flag indicando se é um índice (boolean)
+
+#### Metadados PEIC
+Campos específicos para análise de endividamento:
+- **TIPOINDICE**: Tipo do índice
+- **CAMPO**: Campo específico da análise
+- **TOTAL**: Valor total
+- **ATE_10_SM**: Dados para até 10 salários mínimos
+- **MAIS_DE_10_SM**: Dados para mais de 10 salários mínimos
+- **NUMERO_ABSOLUTO**: Valores absolutos complementares
+
+### Relacionamentos
+
+Cada tabela de metadados está relacionada com sua respectiva tabela principal:
+- `metadados_icec` → `icecs` (via `icec_id`)
+- `metadados_icf` → `icfs` (via `icf_id`)
+- `metadados_peic` → `peics` (via `peic_id`)
+
 ## 🛠 Tecnologias Utilizadas
+
+- **Node.js** - Runtime JavaScript
+- **TypeScript** - Linguagem principal
+- **TypeORM** - ORM para banco de dados
+- **MySQL** - Banco de dados
+- **Playwright** - Automação web (web scraping)
+- **node-cron** - Agendamento de tarefas
+- **Nodemailer** - Envio de emails
+- **Axios** - Cliente HTTP
+- **XLSX** - Processamento de planilhas Excel
+
 
 - **Node.js** - Runtime JavaScript
 - **TypeScript** - Linguagem principal
@@ -157,6 +237,11 @@ REGIONS_PEIC="BR,ES"
 SCHEDULE_ICEC="0 2 1 * *"
 SCHEDULE_ICF="0 5 1 * *"
 SCHEDULE_PEIC="0 8 1 * *"
+
+# Habilitar/Desabilitar Coletas
+ENABLED_ICEC=true
+ENABLED_ICF=true
+ENABLED_PEIC=true
 
 # Múltiplos destinatários para notificações
 NOTIFICATION_EMAIL="destinatario1@dominio.com, destinatario2@empresa.com"
@@ -339,20 +424,6 @@ SCHEDULE_ICF="0 0 10 1,15 * *"
 | `SCHEDULE_ICF` | Agendamento para coleta ICF | `"0 5 1 * *"` | `"0 45 16 15 * *"` |
 | `SCHEDULE_PEIC` | Agendamento para coleta PEIC | `"0 8 1 * *"` | `"0 0 */6 * *"` |
 
-### Configurações de Controle de Execução (Tabela de Referência)
-
-| Variável | Descrição | Valor Padrão | Funcionalidade |
-|----------|-----------|--------------|----------------|
-| `ENABLED_ICEC` | Controla execução da coleta ICEC | `true` | Habilita/desabilita ICEC |
-| `ENABLED_ICF` | Controla execução da coleta ICF | `true` | Habilita/desabilita ICF |
-| `ENABLED_PEIC` | Controla execução da coleta PEIC | `true` | Habilita/desabilita PEIC |
-
-**🎯 Comportamento do Sistema:**
-- **Se `undefined`**: Considera como `true` (habilitado)
-- **Se `true`**: Serviço é executado normalmente
-- **Se `false`**: Serviço é ignorado em execuções automáticas e forçadas
-- **Validação**: Se todos estiverem `false`, aplicação não executa
-
 ### Configurações de Email
 
 | Variável | Descrição |
@@ -380,10 +451,10 @@ SCHEDULE_ICF="0 0 10 1,15 * *"
 
 **Exemplo de configuração seletiva:**
 ```env
-# Coletar apenas ICEC e PEIC (desabilitar ICF)
+# Executar apenas ICEC e ICF
 ENABLED_ICEC=true
-ENABLED_ICF=false
-ENABLED_PEIC=true
+ENABLED_ICF=true
+ENABLED_PEIC=false
 ```
 
 ## 📜 Scripts Disponíveis
@@ -480,7 +551,10 @@ Para cada pesquisa:
 3. **Segunda tentativa**: Web scraping para períodos com falha
 4. **Processamento** dos dados extraídos para tabelas principais
 5. **Extração de metadados** automática das planilhas (apenas para método Planilha)
-6. **Armazenamento** no banco de dados (dados principais + metadados)
+   - **ICEC**: Extrai metadados incluindo campos `TIPOPESQUISA` e `INDICE` para categorização avançada
+   - **ICF**: Extrai metadados com campo `INDICE` para identificação de tipos de dados
+   - **PEIC**: Extrai metadados com campo `NUMERO_ABSOLUTO` para valores complementares
+6. **Armazenamento** no banco de dados com relacionamento entre dados principais e metadados
 7. **Envio de relatório** por email com informações detalhadas:
    - Estatísticas de execução (sucessos, falhas, tempo)
    - Dados por região e método de coleta

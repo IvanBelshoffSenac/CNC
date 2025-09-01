@@ -118,6 +118,7 @@ export class IcecService {
                     metadado.NAO_DURAVEIS = this.parseValueToString(valor.nao_duraveis);
                     metadado.DURAVEIS = this.parseValueToString(valor.duraveis);
                     metadado.INDICE = valor.indice;
+                    metadado.TIPOPESQUISA = valor.tipopesquisa;
 
                     metadados.push(metadado);
                 }

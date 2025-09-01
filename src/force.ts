@@ -12,9 +12,6 @@ async function forceExecution() {
         const orchestrator = new TaskOrchestrator();
         await orchestrator.runAllServicesNow();
 
-        console.log('🔚 Encerrando aplicação...');
-        process.exit(0);
-
     } catch (error) {
         console.error('❌ Erro durante execução forçada:', error);
         process.exit(1);
