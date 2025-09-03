@@ -19,16 +19,24 @@ import { In } from 'typeorm';
 
 export class IcfService {
 
+    // ========================================
+    // PROPRIEDADES E CONFIGURAÇÕES
+    // ========================================
+
     private readonly TEMP_DIR = path.join(__dirname, '../../../temp');
     private readonly TIMEOUT = 30000;
     private baseUrl = process.env.BASE_URL || 'https://backend.pesquisascnc.com.br/admin/4/upload';
+
+    // ========================================
+    // CONSTRUTOR E INICIALIZAÇÃO
+    // ========================================
 
     constructor() {
         this.ensureTempDirectory();
     }
 
     /**
-     * Constrói o diretório temporário para armazenar arquivos
+     * Inicializa e garante que o diretório temporário existe para armazenar arquivos
      */
     private async ensureTempDirectory(): Promise<void> {
         try {
@@ -38,46 +46,13 @@ export class IcfService {
         }
     }
 
-    /**
-     * Salva múltiplos lotes de metadados no banco de dados de uma vez (versão otimizada)
-     */
-    private async saveBatchMetadataToDatabase(
-        metadataToSaveList: Array<{ metadados: MetadadosIcf[]; icfId: string }>,
-        registrosPlanilha: Icf[]
-    ): Promise<void> {
-        try {
-            const allMetadataToSave: MetadadosIcf[] = [];
-
-            // Preparar todos os metadados para salvar
-            for (const item of metadataToSaveList) {
-                // Buscar o registro ICF para vincular
-                const icfEntity = registrosPlanilha.find((i) => i.id === item.icfId);
-
-                if (!icfEntity) {
-                    console.log(`⚠️ Registro ICF com ID ${item.icfId} não encontrado, pulando...`);
-                    continue;
-                }
-
-                // Vincular cada metadado ao registro ICF
-                for (const metadado of item.metadados) {
-                    metadado.icf = icfEntity;
-                    allMetadataToSave.push(metadado);
-                }
-            }
-
-            // Salvar todos os metadados de uma vez usando saveMany (mais eficiente)
-            if (allMetadataToSave.length > 0) {
-                await metadadosIcfRepository.save(allMetadataToSave);
-                console.log(`📊 Total de metadados salvos: ${allMetadataToSave.length}`);
-            }
-
-        } catch (error) {
-            throw new Error(`Erro ao salvar lotes de metadados ICF no banco: ${error}`);
-        }
-    }
+    // ========================================
+    // SEÇÃO 1: MÉTODOS UTILITÁRIOS E HELPERS
+    // ========================================
 
     /**
-     * Converte valor do Excel para string preservando o valor original
+     * Converte qualquer valor para string preservando o valor original
+     * Trata valores nulos e indefinidos retornando string vazia
      */
     private parseValueToString(value: any): string {
         if (value === null || value === undefined) return '';
@@ -85,7 +60,95 @@ export class IcfService {
     }
 
     /**
-     * Extrai os metadados completos da planilha ICF
+     * Constrói a URL completa para download do arquivo Excel ICF
+     * @param mes Mês do período desejado (1-12)
+     * @param ano Ano do período desejado
+     * @param regiao Região do arquivo (padrão: 'BR')
+     * @returns URL completa do arquivo
+     */
+    private buildUrl(mes: number, ano: number, regiao: string = 'BR'): string {
+        return `${this.baseUrl}/${mes}_${ano}/ICF/${regiao}.xls`;
+    }
+
+    // ========================================
+    // SEÇÃO 2: MÉTODOS DE ARQUIVOS E DOWNLOAD
+    // ========================================
+
+    /**
+     * Localiza um arquivo de planilha Excel já baixado na pasta temporária
+     * @param regiao Região do arquivo (ex: 'BR', 'SP')
+     * @param mes Mês do período (1-12)
+     * @param ano Ano do período
+     * @returns Caminho completo do arquivo se encontrado, null caso contrário
+     */
+    private async findExistingExcelFile(regiao: string, mes: number, ano: number): Promise<string | null> {
+        try {
+            const files = await fs.readdir(this.TEMP_DIR);
+
+            // Padrão do nome: icf_REGIAO_MESANO_timestamp.xls
+            // Exemplo: icf_BR_62025_1735123456789.xls
+            const pattern = `icf_${regiao}_${mes}${ano}_`;
+
+            const matchingFile = files.find(file =>
+                file.startsWith(pattern) && file.endsWith('.xls')
+            );
+
+            if (matchingFile) {
+                const fullPath = path.join(this.TEMP_DIR, matchingFile);
+                console.log(`📁 Arquivo encontrado: ${matchingFile}`);
+                return fullPath;
+            }
+
+            console.log(`⚠️ Arquivo não encontrado para padrão: ${pattern}*.xls`);
+            return null;
+        } catch (error) {
+            console.log(`❌ Erro ao buscar arquivo: ${error}`);
+            return null;
+        }
+    }
+
+    /**
+     * Realiza o download de um arquivo Excel ICF do servidor remoto
+     * @param url URL completa do arquivo a ser baixado
+     * @param identifier Identificador único para nomenclatura do arquivo
+     * @returns Caminho completo do arquivo baixado
+     */
+    private async downloadExcelFile(url: string, identifier: string): Promise<string> {
+        const fileName = `icf_${identifier}_${Date.now()}.xls`;
+        const filePath = path.join(this.TEMP_DIR, fileName);
+
+        try {
+            const response = await axios({
+                method: 'GET',
+                url: url,
+                responseType: 'stream',
+                timeout: this.TIMEOUT,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+
+            const writer = fs.createWriteStream(filePath);
+            response.data.pipe(writer);
+
+            return new Promise((resolve, reject) => {
+                writer.on('finish', () => resolve(filePath));
+                writer.on('error', reject);
+            });
+        } catch (error) {
+            throw new Error(`Erro ao baixar arquivo ICF (${identifier}): ${error}`);
+        }
+    }
+
+    // ========================================
+    // SEÇÃO 3: MÉTODOS DE METADADOS
+    // ========================================
+
+    /**
+     * Extrai metadados completos de uma planilha ICF utilizando função otimizada
+     * Processa todos os tipos de índices e seus respectivos valores
+     * @param filePath Caminho completo da planilha Excel
+     * @returns Array de objetos MetadadosIcf com todos os dados estruturados
      */
     private async extractMetadataFromExcel(filePath: string): Promise<MetadadosIcf[]> {
         try {
@@ -126,36 +189,9 @@ export class IcfService {
     }
 
     /**
-     * Localiza um arquivo de planilha já baixado na pasta temporária
-     */
-    private async findExistingExcelFile(regiao: string, mes: number, ano: number): Promise<string | null> {
-        try {
-            const files = await fs.readdir(this.TEMP_DIR);
-
-            // Padrão do nome: icf_REGIAO_MESANO_timestamp.xls
-            // Exemplo: icf_BR_62025_1735123456789.xls
-            const pattern = `icf_${regiao}_${mes}${ano}_`;
-
-            const matchingFile = files.find(file =>
-                file.startsWith(pattern) && file.endsWith('.xls')
-            );
-
-            if (matchingFile) {
-                const fullPath = path.join(this.TEMP_DIR, matchingFile);
-                console.log(`📁 Arquivo encontrado: ${matchingFile}`);
-                return fullPath;
-            }
-
-            console.log(`⚠️ Arquivo não encontrado para padrão: ${pattern}*.xls`);
-            return null;
-        } catch (error) {
-            console.log(`❌ Erro ao buscar arquivo: ${error}`);
-            return null;
-        }
-    }
-
-    /**
-     * Processa metadados para todos os registros ICF do tipo Planilha
+     * Processa extração de metadados para todos os registros ICF obtidos via planilha
+     * Localiza arquivos já baixados e extrai metadados detalhados
+     * @param idsIcf Array com IDs dos registros ICF para processamento de metadados
      */
     private async processMetadataForPlanilhaRecords(idsIcf: string[]): Promise<void> {
         try {
@@ -217,7 +253,7 @@ export class IcfService {
                     const filePath = await this.findExistingExcelFile(periodo.regiao, periodo.mes, periodo.ano);
 
                     if (!filePath) {
-                        console.log(`⚠️ Arquivo não encontrado para ${periodo.regiao} ${periodo.mes}/${periodo.ano}, pulando processamento de metadados...`);
+                        console.log(`⚠️ Arquivo não encontrado para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}, pulando metadados...`);
                         continue;
                     }
 
@@ -225,32 +261,26 @@ export class IcfService {
                     const metadados = await this.extractMetadataFromExcel(filePath);
 
                     if (metadados.length > 0) {
-                        // Encontrar o registro ICF correspondente para a região e período específicos
-                        const icfRecord = registrosPlanilha.find(r =>
-                            r.MES === periodo.mes &&
-                            r.ANO === periodo.ano &&
-                            r.REGIAO === periodo.regiao
+                        // Encontrar registros ICF que correspondem a este período/região
+                        const registrosDoperiodo = registrosPlanilha.filter(
+                            (r) => r.MES === periodo.mes && r.ANO === periodo.ano && r.REGIAO === periodo.regiao
                         );
 
-                        if (icfRecord && icfRecord.id) {
-
-                            const metadadosExistentes = registrosMetadados.find(m =>
-                                m.icf.id === icfRecord.id
+                        for (const registro of registrosDoperiodo) {
+                            // Verificar se já existem metadados para este registro
+                            const metadadosExistentes = registrosMetadados.filter(
+                                (m) => m.icf && m.icf.id === registro.id
                             );
 
-                            if (!metadadosExistentes) {
-                                // Acumular para salvar no final
+                            if (metadadosExistentes.length === 0) {
                                 metadataToSaveList.push({
-                                    metadados,
-                                    icfId: icfRecord.id
+                                    metadados: [...metadados], // Fazer cópia dos metadados
+                                    icfId: registro.id!
                                 });
-
-                                console.log(`✅ Metadados preparados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano} (${metadados.length} registros)`);
+                                console.log(`✅ Metadados preparados para ICF ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
                             } else {
-                                console.log(`ℹ️ Metadados já existem para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
+                                console.log(`ℹ️ Metadados já existem para ICF ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
                             }
-                        } else {
-                            console.log(`⚠️ Registro ICF ${periodo.regiao} não encontrado para período ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
                         }
                     } else {
                         console.log(`⚠️ Nenhum metadado extraído para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
@@ -278,8 +308,15 @@ export class IcfService {
         }
     }
 
+    // ========================================
+    // SEÇÃO 4: MÉTODOS DE BANCO DE DADOS
+    // ========================================
+
     /**
-     * Salva múltiplos registros ICF no banco de dados de uma vez (versão otimizada)
+     * Salva múltiplos registros ICF no banco de dados de forma otimizada
+     * Utiliza operação em lote para melhor performance
+     * @param icfDataList Array de objetos Icf para serem salvos
+     * @returns Array com os IDs dos registros salvos
      */
     private async saveBatchIcfToDatabase(icfDataList: Icf[]): Promise<string[]> {
         try {
@@ -317,271 +354,88 @@ export class IcfService {
     }
 
     /**
-     * Processa os valores completos da tabela ICF.
+     * Salva múltiplos lotes de metadados no banco de dados de forma otimizada
+     * Vincula cada metadado ao seu respectivo registro ICF
+     * @param metadataToSaveList Lista de lotes de metadados para salvar
+     * @param registrosPlanilha Registros ICF para vinculação
      */
-    private processCompleteIcfTableValues(values: string[]): Icf {
-        console.log('🔄 Processando valores completos ICF:', values);
-
-        if (values.length < 6) {
-            throw new Error(`Dados ICF completos insuficientes. Esperado: 6 valores (3 pontos + 3 percentuais), Encontrado: ${values.length}`);
-        }
-
-        // Parsear valores como string preservando o valor original
-        return {
-            // Primeiros 3 valores são os pontos - mantendo como string
-            NC_PONTOS: String(values[0] || ''),              // NC (pontos)
-            ATE_10_SM_PONTOS: String(values[1] || ''),       // Até 10 SM (pontos)
-            MAIS_DE_10_SM_PONTOS: String(values[2] || ''),   // Mais de 10 SM (pontos)
-            // Próximos 3 valores são os percentuais - mantendo como string
-            NC_PERCENTUAL: String(values[3] || ''),          // NC (percentual)
-            ATE_10_SM_PERCENTUAL: String(values[4] || ''),   // Até 10 SM (percentual)
-            MAIS_DE_10_SM_PERCENTUAL: String(values[5] || ''), // Mais de 10 SM (percentual)
-            MES: 0, // Será definido posteriormente
-            ANO: 0, // Será definido posteriormente
-            REGIAO: 'BR' as any, // Será definido posteriormente
-            METODO: Metodo.PLA
-        };
-    }
-
-    /**
-     * Extrai os dados completos da tabela ICF para um determinado mês e ano.
-     */
-    private async extractCompleteTableData(page: any, mes: number, ano: number): Promise<Icf> {
-        // Mapear mês para formato abreviado em inglês (JUL 25)
-        const meses = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-        const mesAbrev = meses[mes - 1];
-        const anoAbrev = ano.toString().slice(-2); // Pegar últimos 2 dígitos
-        const periodoTarget = `${mesAbrev} ${anoAbrev}`;
-
-        console.log(`🔍 Procurando período ICF: ${periodoTarget}`);
-
+    private async saveBatchMetadataToDatabase(
+        metadataToSaveList: Array<{ metadados: MetadadosIcf[]; icfId: string }>,
+        registrosPlanilha: Icf[]
+    ): Promise<void> {
         try {
-            // Usar abordagem similar aos outros serviços
-            const table = await page.frameLocator('#dadosPesquisa').getByRole('table');
-            const rows = await table.locator('tr');
+            const allMetadataToSave: MetadadosIcf[] = [];
 
-            // Extrair todos os dados da tabela
-            const data = await rows.allInnerTexts();
-            console.log(`✅ Dados extraídos: ${data.length} linhas`);
+            // Preparar todos os metadados para salvar
+            for (const item of metadataToSaveList) {
+                // Buscar o registro ICF para vincular
+                const icfEntity = registrosPlanilha.find((i) => i.id === item.icfId);
 
-            // Filtrar e processar os dados
-            for (let i = 0; i < data.length; i++) {
-                const rowData = data[i];
-                if (rowData && rowData.includes(periodoTarget)) {
-                    console.log(`✅ Período encontrado: ${periodoTarget}`);
-                    console.log(`📊 Dados da linha: ${rowData}`);
+                if (!icfEntity) {
+                    console.log(`⚠️ Registro ICF com ID ${item.icfId} não encontrado, pulando...`);
+                    continue;
+                }
 
-                    // Dividir por tab ou espaços múltiplos
-                    const values = rowData.split(/\t+/).filter(val => val.trim() !== '');
-
-                    console.log('📊 Valores separados:', values);
-
-                    // Validar se temos pelo menos 7 valores (período + 6 dados ICF: 3 pontos + 3 percentuais)
-                    if (values.length < 7) {
-                        console.log('⚠️ Tentando separação alternativa por espaços múltiplos');
-                        const altValues = rowData.split(/\s{2,}/).filter(val => val.trim() !== '');
-                        console.log('📊 Valores alternativos:', altValues);
-
-                        if (altValues.length >= 7) {
-                            return this.processCompleteIcfTableValues(altValues.slice(1)); // Pular a primeira coluna (período)
-                        } else {
-                            throw new Error(`Dados insuficientes na tabela ICF. Esperado: 7 valores (período + 6 dados), Encontrado: ${altValues.length}`);
-                        }
-                    }
-
-                    return this.processCompleteIcfTableValues(values.slice(1)); // Pular a primeira coluna (período)
+                // Vincular cada metadado ao registro ICF
+                for (const metadado of item.metadados) {
+                    metadado.icf = icfEntity;
+                    allMetadataToSave.push(metadado);
                 }
             }
 
-            // Se não encontrou o período, mostrar períodos disponíveis
-            console.log('🔍 Períodos disponíveis na tabela ICF:');
-            data.forEach((rowData: string) => {
-                if (rowData && rowData.trim()) {
-                    const firstValue = rowData.split(/[\t\s]+/)[0];
-                    if (firstValue && firstValue.match(/[A-Z]{3}\s?\d{2}/)) {
-                        console.log(`   - "${firstValue.trim()}"`);
-                    }
-                }
-            });
-
-            throw new Error(`Período ${periodoTarget} não encontrado na tabela ICF`);
+            // Salvar todos os metadados de uma vez usando saveMany (mais eficiente)
+            if (allMetadataToSave.length > 0) {
+                await metadadosIcfRepository.save(allMetadataToSave);
+                console.log(`📊 Total de metadados salvos: ${allMetadataToSave.length}`);
+            }
 
         } catch (error) {
-            console.error('❌ Erro ao extrair dados completos da tabela ICF:', error);
-            throw error;
+            throw new Error(`Erro ao salvar lotes de metadados ICF no banco: ${error}`);
         }
     }
 
     /**
-     * Extrai dados completos do web scraping (pontos + percentuais)
-     * Para web scraping: a tabela já contém tanto os pontos quanto os percentuais
-     * Formato da tabela: MESES | NC | ATÉ 10 SM | + DE 10 SM | NC | ATÉ 10 SM | + DE 10 SM
-     * Exemplo: FEB 10 | 135,8 | 134,1 | 146,1 | 0,2 | 0,5 | -1,8
+     * Remove todos os dados ICF e metadados do banco de dados
+     * Respeita a ordem de exclusão para manter integridade referencial
+     * @returns String com log das operações realizadas
      */
-    private async extractDataFromWebsite(page: any, mes: number, ano: number, regiao: string): Promise<Icf> {
-        console.log(`📊 Extraindo dados do site ICF para ${regiao} ${mes}/${ano}`);
-
-        // Aguardar o formulário de pesquisa estar disponível
-        await page.waitForSelector('#formPesquisa');
-
-        // Selecionar ano
-        await page.locator('#selectAno').selectOption(ano.toString());
-        console.log(`✅ Ano selecionado: ${ano}`);
-
-        // Selecionar mês (sem zero à esquerda)
-        await page.locator('#selectMes').selectOption(mes.toString());
-        console.log(`✅ Mês selecionado: ${mes}`);
-
-        // Selecionar região/estado
-        await page.locator('#selectEstado').selectOption(regiao);
-        console.log(`✅ Região selecionada: ${regiao}`);
-
-        // Clicar no botão Filtrar
-        await page.getByRole('button', { name: 'Filtrar' }).click();
-        console.log('✅ Botão Filtrar clicado');
-
-        // Aguardar a tabela carregar dentro do iframe
-        await page.waitForTimeout(3000);
-
-        // Buscar a tabela dentro do iframe #dadosPesquisa
-        const table = await page.frameLocator('#dadosPesquisa').getByRole('table');
-        console.log('✅ Tabela encontrada no iframe');
-
-        // Aguardar um pouco mais para garantir que a tabela carregou completamente
-        await page.waitForTimeout(1000);
-
-        // Para web scraping, extrair dados completos diretamente da tabela
-        const completeData = await this.extractCompleteTableData(page, mes, ano);
-
-        const icfData: Icf = {
-            NC_PONTOS: completeData.NC_PONTOS,
-            ATE_10_SM_PONTOS: completeData.ATE_10_SM_PONTOS,
-            MAIS_DE_10_SM_PONTOS: completeData.MAIS_DE_10_SM_PONTOS,
-            NC_PERCENTUAL: completeData.NC_PERCENTUAL,
-            ATE_10_SM_PERCENTUAL: completeData.ATE_10_SM_PERCENTUAL,
-            MAIS_DE_10_SM_PERCENTUAL: completeData.MAIS_DE_10_SM_PERCENTUAL,
-            MES: mes,
-            ANO: ano,
-            REGIAO: regiao as Regiao,
-            METODO: Metodo.WS
-        };
-
-        console.log('📈 Dados extraídos:', icfData);
-        return icfData;
-    }
-
-    /**
-     * Realiza o login no site ICF usando Playwright
-     */
-    private async performLogin(page: any): Promise<void> {
-        console.log('🔐 Fazendo login no site ICF...');
-
-        const baseUrl = process.env.BASE_URL_SITE_ICF || 'https://pesquisascnc.com.br/pesquisa-icf/';
-
-        await page.goto(baseUrl);
-        console.log('✅ Página carregada');
-
-        // Aguardar os campos de login aparecerem
-        await page.waitForSelector('#log');
-        await page.waitForSelector('#pwd');
-
-        // Preencher credenciais usando os IDs corretos
-        await page.fill('#log', process.env.CREDENTIALS_USER || '');
-        console.log('✅ Email preenchido');
-
-        await page.fill('#pwd', process.env.CREDENTIALS_PASSWORD || '');
-        console.log('✅ Senha preenchida');
-
-        // Clicar no botão de login usando o ID correto
-        await page.click('#actionLogin');
-        console.log('✅ Login realizado');
-
-        // Aguardar o formulário de pesquisa aparecer (confirma que o login foi bem-sucedido)
-        await page.waitForSelector('#formPesquisa', { timeout: 10000 });
-        console.log('✅ Login confirmado - formulário de pesquisa carregado');
-    }
-
-    /**
-     * Versão com monitoramento do retry por web scraping para ICF
-     */
-    private async retryWithWebScrapingMonitoring(errorList: IErrorService[], tasks: ITask[]): Promise<number> {
-        const browser = await chromium.launch({ headless: false });
-
+    private async cleanDatabase(): Promise<string> {
         try {
-            const page = await browser.newPage();
+            const logMessages: string[] = [];
 
-            // Fazer login
-            await this.performLogin(page);
+            // Limpar metadados primeiro (respeitando foreign key constraint)
+            console.log('🧹 Limpando metadados ICF...');
+            await metadadosIcfRepository.createQueryBuilder()
+                .delete()
+                .from(MetadadosIcf)
+                .execute();
+            logMessages.push('✅ Metadados ICF limpos com sucesso');
 
-            let sucessosWebScraping = 0;
-            const webScrapingDataList: Icf[] = [];
+            // Limpar registros ICF
+            console.log('🧹 Limpando registros ICF...');
+            await icfRepository.createQueryBuilder()
+                .delete()
+                .from(Icf)
+                .execute();
+            logMessages.push('✅ Registros ICF limpos com sucesso');
 
-            for (const error of errorList) {
-                try {
-                    console.log(`🌐 Tentando web scraping para ICF ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
+            return logMessages.join('\n') + '\n';
 
-                    const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
-
-                    // Acumular dados em vez de salvar imediatamente
-                    webScrapingDataList.push(data);
-
-                    console.log(`✅ Web scraping bem-sucedido: ICF ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
-                    sucessosWebScraping++;
-
-                    // Atualizar task correspondente para sucesso
-                    const taskIndex = tasks.findIndex(t =>
-                        t.mes === error.mes &&
-                        t.ano === error.ano &&
-                        t.regiao === error.regiao &&
-                        t.status === 'Falha'
-                    );
-
-                    if (taskIndex !== -1) {
-                        tasks[taskIndex].status = 'Sucesso';
-                        tasks[taskIndex].metodo = Metodo.WS;
-                        delete tasks[taskIndex].erro;
-                    }
-
-                } catch (scrapingError) {
-                    console.log(`❌ Falha no web scraping: ICF ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano} - ${scrapingError}`);
-
-                    // Atualizar erro na task
-                    const taskIndex = tasks.findIndex(t =>
-                        t.mes === error.mes &&
-                        t.ano === error.ano &&
-                        t.regiao === error.regiao &&
-                        t.status === 'Falha'
-                    );
-
-                    if (taskIndex !== -1) {
-                        tasks[taskIndex].erro = `Planilha: ${tasks[taskIndex].erro} | Web Scraping: ${scrapingError}`;
-                    }
-                }
-            }
-
-            // Salvar todos os dados de web scraping de uma vez
-            if (webScrapingDataList.length > 0) {
-                console.log(`\n💾 Salvando ${webScrapingDataList.length} registros de web scraping no banco de dados...`);
-                await this.saveBatchIcfToDatabase(webScrapingDataList);
-                console.log(`✅ Todos os registros de web scraping foram salvos com sucesso!`);
-            }
-
-            console.log(`\n=== Resultado do Web Scraping ICF ===`);
-            console.log(`Sucessos: ${sucessosWebScraping}`);
-            console.log(`Erros: ${errorList.length - sucessosWebScraping}`);
-            console.log(`Total tentativas: ${errorList.length}`);
-
-            return sucessosWebScraping;
-
-        } finally {
-            await browser.close();
+        } catch (error) {
+            return `Erro ao limpar a base de dados ICF: ${error}\n`;
         }
     }
 
+    // ========================================
+    // SEÇÃO 5: MÉTODOS DE PROCESSAMENTO DE DADOS
+    // ========================================
+
     /**
-    * Extrai os dados completos ICF de uma planilha Excel (pontos + percentuais)
-    * Estrutura da nova planilha: já contém os percentuais calculados na linha "Índice (Variação Mensal)"
-    */
+     * Extrai os dados completos ICF de uma planilha Excel
+     * Busca especificamente pelas linhas 'Índice (Em Pontos)' e 'Índice (Variação Mensal)'
+     * @param filePath Caminho completo do arquivo Excel a ser processado
+     * @returns Objeto Icf com todos os dados extraídos (valores como string)
+     */
     private async extractCompleteDataFromExcel(filePath: string): Promise<Icf> {
         try {
             const workbook = XLSX.readFile(filePath);
@@ -641,69 +495,284 @@ export class IcfService {
         }
     }
 
-    /** Realiza o download do arquivo Excel ICF */
-    private async downloadExcelFile(url: string, identifier: string): Promise<string> {
-        const fileName = `icf_${identifier}_${Date.now()}.xls`;
-        const filePath = path.join(this.TEMP_DIR, fileName);
+    // ========================================
+    // SEÇÃO 6: MÉTODOS DE WEB SCRAPING
+    // ========================================
+
+    /**
+     * Processa e valida valores extraídos da tabela ICF mantendo formato string
+     * @param values Array de strings com os valores da tabela (6 valores: 3 pontos + 3 percentuais)
+     * @returns Objeto Icf com os dados formatados
+     */
+    private processIcfTableValues(values: string[]): Icf {
+        console.log('🔄 Processando valores completos ICF:', values);
+
+        if (values.length < 6) {
+            throw new Error(`Dados ICF completos insuficientes. Esperado: 6 valores (3 pontos + 3 percentuais), Encontrado: ${values.length}`);
+        }
+
+        // Parsear valores como string preservando o valor original
+        return {
+            // Primeiros 3 valores são os pontos - mantendo como string
+            NC_PONTOS: String(values[0] || ''),              // NC (pontos)
+            ATE_10_SM_PONTOS: String(values[1] || ''),       // Até 10 SM (pontos)
+            MAIS_DE_10_SM_PONTOS: String(values[2] || ''),   // Mais de 10 SM (pontos)
+            // Próximos 3 valores são os percentuais - mantendo como string
+            NC_PERCENTUAL: String(values[3] || ''),          // NC (percentual)
+            ATE_10_SM_PERCENTUAL: String(values[4] || ''),   // Até 10 SM (percentual)
+            MAIS_DE_10_SM_PERCENTUAL: String(values[5] || ''), // Mais de 10 SM (percentual)
+            MES: 0, // Será definido posteriormente
+            ANO: 0, // Será definido posteriormente
+            REGIAO: 'BR' as any, // Será definido posteriormente
+            METODO: Metodo.PLA
+        };
+    }
+
+    /**
+     * Realiza autenticação no site ICF utilizando credenciais do ambiente
+     * @param page Instância da página do Playwright
+     */
+    private async performLogin(page: any): Promise<void> {
+        console.log('🔐 Fazendo login no site ICF...');
+
+        const baseUrl = process.env.BASE_URL_SITE_ICF || 'https://pesquisascnc.com.br/pesquisa-icf/';
+
+        await page.goto(baseUrl);
+        console.log('✅ Página carregada');
+
+        // Aguardar os campos de login aparecerem
+        await page.waitForSelector('#log');
+        await page.waitForSelector('#pwd');
+
+        // Preencher credenciais usando os IDs corretos
+        await page.fill('#log', process.env.CREDENTIALS_USER || '');
+        console.log('✅ Email preenchido');
+
+        await page.fill('#pwd', process.env.CREDENTIALS_PASSWORD || '');
+        console.log('✅ Senha preenchida');
+
+        // Clicar no botão de login usando o ID correto
+        await page.click('#actionLogin');
+        console.log('✅ Login realizado');
+
+        // Aguardar o formulário de pesquisa aparecer (confirma que o login foi bem-sucedido)
+        await page.waitForSelector('#formPesquisa', { timeout: 10000 });
+        console.log('✅ Login confirmado - formulário de pesquisa carregado');
+    }
+
+    /**
+     * Extrai dados ICF do site via web scraping para um período específico
+     * @param page Instância da página do Playwright
+     * @param mes Mês do período desejado (1-12)
+     * @param ano Ano do período desejado
+     * @param regiao Região dos dados (ex: 'BR', 'SP')
+     * @returns Objeto Icf com dados extraídos via web scraping
+     */
+    private async extractDataFromWebsite(page: any, mes: number, ano: number, regiao: string): Promise<Icf> {
+        console.log(`📊 Extraindo dados do site ICF para ${regiao} ${mes}/${ano}`);
+
+        // Aguardar o formulário de pesquisa estar disponível
+        await page.waitForSelector('#formPesquisa');
+
+        // Selecionar ano
+        await page.locator('#selectAno').selectOption(ano.toString());
+        console.log(`✅ Ano selecionado: ${ano}`);
+
+        // Selecionar mês (sem zero à esquerda)
+        await page.locator('#selectMes').selectOption(mes.toString());
+        console.log(`✅ Mês selecionado: ${mes}`);
+
+        // Selecionar região/estado
+        await page.locator('#selectEstado').selectOption(regiao);
+        console.log(`✅ Região selecionada: ${regiao}`);
+
+        // Clicar no botão Filtrar
+        await page.getByRole('button', { name: 'Filtrar' }).click();
+        console.log('✅ Botão Filtrar clicado');
+
+        // Aguardar a tabela carregar dentro do iframe
+        await page.waitForTimeout(3000);
+
+        // Buscar a tabela dentro do iframe #dadosPesquisa
+        const table = await page.frameLocator('#dadosPesquisa').getByRole('table');
+        console.log('✅ Tabela encontrada no iframe');
+
+        // Aguardar um pouco mais para garantir que a tabela carregou completamente
+        await page.waitForTimeout(1000);
+
+        // Para web scraping, extrair dados completos diretamente da tabela
+        const completeData = await this.extractCompleteTableData(page, mes, ano);
+
+        const icfData: Icf = {
+            NC_PONTOS: completeData.NC_PONTOS,
+            ATE_10_SM_PONTOS: completeData.ATE_10_SM_PONTOS,
+            MAIS_DE_10_SM_PONTOS: completeData.MAIS_DE_10_SM_PONTOS,
+            NC_PERCENTUAL: completeData.NC_PERCENTUAL,
+            ATE_10_SM_PERCENTUAL: completeData.ATE_10_SM_PERCENTUAL,
+            MAIS_DE_10_SM_PERCENTUAL: completeData.MAIS_DE_10_SM_PERCENTUAL,
+            MES: mes,
+            ANO: ano,
+            REGIAO: regiao as Regiao,
+            METODO: Metodo.WS
+        };
+
+        console.log('📈 Dados extraídos:', icfData);
+        return icfData;
+    }
+
+    /**
+     * Extrai e processa dados específicos da tabela ICF no site
+     * @param page Instância da página do Playwright
+     * @param mes Mês do período para localização na tabela
+     * @param ano Ano do período para localização na tabela
+     * @returns Dados processados da tabela ICF
+     */
+    private async extractCompleteTableData(page: any, mes: number, ano: number): Promise<Icf> {
+        // Mapear mês para formato abreviado em inglês (JUL 25)
+        const meses = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const mesAbrev = meses[mes - 1];
+        const anoAbrev = ano.toString().slice(-2); // Pegar últimos 2 dígitos
+        const periodoTarget = `${mesAbrev} ${anoAbrev}`;
+
+        console.log(`🔍 Procurando período ICF: ${periodoTarget}`);
 
         try {
-            const response = await axios({
-                method: 'GET',
-                url: url,
-                responseType: 'stream',
-                timeout: this.TIMEOUT,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            // Usar abordagem similar aos outros serviços
+            const table = await page.frameLocator('#dadosPesquisa').getByRole('table');
+            const rows = await table.locator('tr');
+
+            // Extrair todos os dados da tabela
+            const data = await rows.allInnerTexts();
+            console.log(`✅ Dados extraídos: ${data.length} linhas`);
+
+            // Filtrar e processar os dados
+            for (let i = 0; i < data.length; i++) {
+                const rowData = data[i];
+                if (rowData && rowData.includes(periodoTarget)) {
+                    console.log(`✅ Período encontrado: ${periodoTarget}`);
+                    console.log(`📊 Dados da linha: ${rowData}`);
+
+                    // Dividir por tab ou espaços múltiplos
+                    const values = rowData.split(/\t+/).filter(val => val.trim() !== '');
+
+                    console.log('📊 Valores separados:', values);
+
+                    // Validar se temos pelo menos 7 valores (período + 6 dados ICF: 3 pontos + 3 percentuais)
+                    if (values.length < 7) {
+                        console.log('⚠️ Tentando separação alternativa por espaços múltiplos');
+                        const altValues = rowData.split(/\s{2,}/).filter(val => val.trim() !== '');
+                        console.log('📊 Valores alternativos:', altValues);
+
+                        if (altValues.length >= 7) {
+                            return this.processIcfTableValues(altValues.slice(1)); // Pular a primeira coluna (período)
+                        } else {
+                            throw new Error(`Dados insuficientes na tabela ICF. Esperado: 7 valores (período + 6 dados), Encontrado: ${altValues.length}`);
+                        }
+                    }
+
+                    return this.processIcfTableValues(values.slice(1)); // Pular a primeira coluna (período)
+                }
+            }
+
+            // Se não encontrou o período, mostrar períodos disponíveis
+            console.log('🔍 Períodos disponíveis na tabela ICF:');
+            data.forEach((rowData: string) => {
+                if (rowData && rowData.trim()) {
+                    const firstValue = rowData.split(/[\t\s]+/)[0];
+                    if (firstValue && firstValue.match(/[A-Z]{3}\s?\d{2}/)) {
+                        console.log(`   - "${firstValue.trim()}"`);
+                    }
                 }
             });
 
-            const writer = fs.createWriteStream(filePath);
-            response.data.pipe(writer);
-
-            return new Promise((resolve, reject) => {
-                writer.on('finish', () => resolve(filePath));
-                writer.on('error', reject);
-            });
-        } catch (error) {
-            throw new Error(`Erro ao baixar arquivo ICF (${identifier}): ${error}`);
-        }
-    }
-
-    /** Constrói a URL para o arquivo Excel ICF */
-    private buildUrl(mes: number, ano: number, regiao: string = 'BR'): string {
-        return `${this.baseUrl}/${mes}_${ano}/ICF/${regiao}.xls`;
-    }
-
-    /** Limpa a base de dados ICF */
-    private async cleanDatabase(): Promise<string> {
-        try {
-            const logMessages: string[] = [];
-
-            // Limpar metadados primeiro (respeitando foreign key constraint)
-            console.log('🧹 Limpando metadados ICF...');
-            await metadadosIcfRepository.createQueryBuilder()
-                .delete()
-                .from(MetadadosIcf)
-                .execute();
-            logMessages.push('✅ Metadados ICF limpos com sucesso');
-
-            // Limpar registros ICF
-            console.log('🧹 Limpando registros ICF...');
-            await icfRepository.createQueryBuilder()
-                .delete()
-                .from(Icf)
-                .execute();
-            logMessages.push('✅ Registros ICF limpos com sucesso');
-
-            return logMessages.join('\n') + '\n';
+            throw new Error(`Período ${periodoTarget} não encontrado na tabela ICF`);
 
         } catch (error) {
-            return `Erro ao limpar a base de dados ICF: ${error}\n`;
+            console.error('❌ Erro ao extrair dados completos da tabela ICF:', error);
+            throw error;
         }
     }
 
     /**
-     * Versão com monitoramento do processamento ICF
+     * Executa tentativas de recuperação via web scraping para períodos que falharam
+     * Implementa monitoramento detalhado de cada tentativa
+     * @param errorList Lista de erros/períodos para retry
+     * @param tasks Array de tasks para atualização de status
+     * @returns Número de sucessos obtidos via web scraping
+     */
+    private async retryWithWebScrapingMonitoring(errorList: IErrorService[], tasks: ITask[]): Promise<number> {
+        const browser = await chromium.launch({ headless: false });
+
+        try {
+            const page = await browser.newPage();
+
+            // Fazer login
+            await this.performLogin(page);
+
+            let sucessosWebScraping = 0;
+
+            for (const error of errorList) {
+                try {
+                    console.log(LogMessages.webScrapingInicio('ICF', error.regiao, error.mes, error.ano));
+
+                    const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
+                    const savedIds = await this.saveBatchIcfToDatabase([data]);
+
+                    console.log(LogMessages.webScrapingSucesso('ICF', error.regiao, error.mes, error.ano));
+                    sucessosWebScraping++;
+
+                    // Atualizar task correspondente para sucesso
+                    const taskIndex = tasks.findIndex(t => 
+                        t.mes === error.mes && 
+                        t.ano === error.ano && 
+                        t.regiao === error.regiao && 
+                        t.status === 'Falha'
+                    );
+                    
+                    if (taskIndex !== -1) {
+                        tasks[taskIndex].status = 'Sucesso';
+                        tasks[taskIndex].metodo = Metodo.WS;
+                        delete tasks[taskIndex].erro;
+                    }
+
+                } catch (scrapingError) {
+                    console.log(LogMessages.webScrapingFalha('ICF', error.regiao, error.mes, error.ano, scrapingError));
+                    
+                    // Atualizar erro na task
+                    const taskIndex = tasks.findIndex(t => 
+                        t.mes === error.mes && 
+                        t.ano === error.ano && 
+                        t.regiao === error.regiao && 
+                        t.status === 'Falha'
+                    );
+                    
+                    if (taskIndex !== -1) {
+                        tasks[taskIndex].erro = `Planilha: ${tasks[taskIndex].erro} | Web Scraping: ${scrapingError}`;
+                    }
+                }
+            }
+
+            console.log(`\n=== Resultado do Web Scraping ICF ===`);
+            console.log(`Sucessos: ${sucessosWebScraping}`);
+            console.log(`Erros: ${errorList.length - sucessosWebScraping}`);
+            console.log(`Total tentativas: ${errorList.length}`);
+
+            return sucessosWebScraping;
+
+        } finally {
+            await browser.close();
+        }
+    }
+
+    // ========================================
+    // SEÇÃO 7: MÉTODO PRINCIPAL PÚBLICO
+    // ========================================
+
+    /**
+     * Método principal que executa o processamento completo dos dados ICF
+     * Inclui download, extração, salvamento, retry via web scraping e processamento de metadados
+     * @param regioes Array de regiões para processamento (padrão: ['BR'])
+     * @returns Objeto IServiceResult com estatísticas completas da execução
      */
     public async processAllIcfDataWithMonitoring(regioes: string[] = ['BR']): Promise<IServiceResult> {
         const startTime = Date.now();
@@ -719,31 +788,29 @@ export class IcfService {
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;
         let erros: IErrorService[] = [];
+        let savedIds: string[] = [];
 
         // Array para acumular todos os dados ICF antes de salvar
         const icfDataList: Icf[] = [];
 
         for (const period of periods) {
             for (const regiao of regioes) {
-
                 try {
                     console.log(LogMessages.processando('ICF', regiao, period.mes, period.ano));
 
                     const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
-                    const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}_${Date.now()}`);
+                    const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}`);
 
-                    // Extrair dados completos diretamente da planilha (pontos + percentuais)
+                    // Extrair dados completos diretamente da planilha
                     const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
 
                     const icfData: Icf = {
                         ...completeData,
                         MES: period.mes,
                         ANO: period.ano,
-                        REGIAO: regiao as Regiao,
-                        METODO: Metodo.PLA
+                        REGIAO: regiao as Regiao
                     };
 
-                    // Acumular dados em vez de salvar imediatamente
                     icfDataList.push(icfData);
 
                     console.log(LogMessages.sucesso('ICF', regiao, period.mes, period.ano));
@@ -751,7 +818,7 @@ export class IcfService {
                     tasks.push({
                         mes: period.mes,
                         ano: period.ano,
-                        regiao: regiao,
+                        regiao,
                         status: 'Sucesso',
                         servico: 'ICF',
                         metodo: Metodo.PLA
@@ -765,7 +832,7 @@ export class IcfService {
                     tasks.push({
                         mes: period.mes,
                         ano: period.ano,
-                        regiao: regiao,
+                        regiao,
                         status: 'Falha',
                         servico: 'ICF',
                         metodo: Metodo.PLA,
@@ -781,12 +848,10 @@ export class IcfService {
             }
         }
 
-        let idsSalvos: string[] = [];
-
         // Salvar todos os registros ICF de uma vez
         if (icfDataList.length > 0) {
             console.log(`\n💾 Salvando ${icfDataList.length} registros ICF no banco de dados...`);
-            idsSalvos = await this.saveBatchIcfToDatabase(icfDataList);
+            savedIds = await this.saveBatchIcfToDatabase(icfDataList);
             console.log(`✅ Todos os registros ICF foram salvos com sucesso!`);
         }
 
@@ -826,9 +891,9 @@ export class IcfService {
         console.log(`Registros por web scraping: ${registrosWebScraping}`);
 
         // Nova etapa: processar metadados para registros do tipo Planilha
-        if (idsSalvos.length) {
+        if (savedIds.length) {
             console.log('\n🔄 Iniciando processamento de metadados ICF...');
-            await this.processMetadataForPlanilhaRecords(idsSalvos);
+            await this.processMetadataForPlanilhaRecords(savedIds);
         }
 
         // Limpeza da pasta temp ao final da execução

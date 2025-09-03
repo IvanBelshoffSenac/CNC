@@ -5,7 +5,7 @@ import * as fs from 'fs-extra';
 import * as dotenv from 'dotenv';
 import { addDays, addMonths, format, differenceInDays, setDate, setHours, setMinutes, setSeconds, isAfter, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { IServiceResult, ITask } from '../shared/interfaces';
+import { IServiceResult } from '../shared/interfaces';
 
 dotenv.config();
 
@@ -230,8 +230,6 @@ export class NotificationService {
             minute: '2-digit'
         });
 
-        console.log(resultados)
-
         const tempoTotalExecucao = resultados.reduce((total, r) => total + r.tempoExecucao, 0);
         const totalRegistrosGeral = resultados.reduce((total, r) => total + r.totalRegistros, 0);
         const totalSucessosGeral = resultados.reduce((total, r) => total + r.sucessos, 0);
@@ -403,33 +401,6 @@ export class NotificationService {
         }
     }
 
-    /**
-     * Testa o envio de notificação
-     */
-    public async testarNotificacao(): Promise<void> {
-        console.log('🧪 Executando teste de notificação...');
-
-        const resultadosTeste: IServiceResult[] = [
-            {
-                servico: 'ICEC',
-                periodoInicio: '01/2010',
-                periodoFim: '08/2025',
-                tempoExecucao: 1800, // 30 minutos
-                tasks: [
-                    { mes: 1, ano: 2010, regiao: 'BR', status: 'Sucesso', servico: 'ICEC', metodo: 'Planilha' as any },
-                    { mes: 2, ano: 2010, regiao: 'BR', status: 'Falha', servico: 'ICEC', metodo: 'Web Scraping' as any, erro: 'Arquivo não encontrado' }
-                ],
-                totalRegistros: 180,
-                registrosPlanilha: 150,
-                registrosWebScraping: 30,
-                sucessos: 150,
-                falhas: 30,
-                modoExecucao: 'Forçado'
-            }
-        ];
-
-        await this.enviarRelatorioCompleto(resultadosTeste, 'Forçado');
-    }
 }
 
 export const notificationService = new NotificationService();

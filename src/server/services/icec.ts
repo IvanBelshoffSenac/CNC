@@ -19,16 +19,24 @@ import { In } from 'typeorm';
 
 export class IcecService {
 
+    // ========================================
+    // PROPRIEDADES E CONFIGURAÇÕES
+    // ========================================
+
     private readonly TEMP_DIR = path.join(__dirname, '../../../temp');
     private readonly TIMEOUT = 30000;
     private baseUrl = process.env.BASE_URL || 'https://backend.pesquisascnc.com.br/admin/4/upload';
+
+    // ========================================
+    // CONSTRUTOR E INICIALIZAÇÃO
+    // ========================================
 
     constructor() {
         this.ensureTempDirectory();
     }
 
     /**
-     * Constrói o diretório temporário para armazenar arquivos
+     * Inicializa e garante que o diretório temporário existe para armazenar arquivos
      */
     private async ensureTempDirectory(): Promise<void> {
         try {
@@ -39,49 +47,12 @@ export class IcecService {
     }
 
     // ========================================
-    // SEÇÃO 1: MÉTODOS DE METADADOS
+    // SEÇÃO 1: MÉTODOS UTILITÁRIOS E HELPERS
     // ========================================
 
     /**
-     * Salva múltiplos lotes de metadados no banco de dados de uma vez (versão otimizada)
-     */
-    private async saveBatchMetadataToDatabase(
-        metadataToSaveList: Array<{ metadados: MetadadosIcec[]; icecId: string }>,
-        registrosPlanilha: Icec[]
-    ): Promise<void> {
-        try {
-            const allMetadataToSave: MetadadosIcec[] = [];
-
-            // Preparar todos os metadados para salvar
-            for (const item of metadataToSaveList) {
-                // Buscar o registro ICEC para vincular
-                const icecEntity = registrosPlanilha.find((i) => i.id === item.icecId);
-
-                if (!icecEntity) {
-                    console.log(`⚠️ Registro ICEC com ID ${item.icecId} não encontrado, pulando...`);
-                    continue;
-                }
-
-                // Vincular cada metadado ao registro ICEC
-                for (const metadado of item.metadados) {
-                    metadado.icec = icecEntity;
-                    allMetadataToSave.push(metadado);
-                }
-            }
-
-            // Salvar todos os metadados de uma vez usando saveMany (mais eficiente)
-            if (allMetadataToSave.length > 0) {
-                await metadadosIcecRepository.save(allMetadataToSave);
-                console.log(`📊 Total de metadados salvos: ${allMetadataToSave.length}`);
-            }
-
-        } catch (error) {
-            throw new Error(`Erro ao salvar lotes de metadados ICEC no banco: ${error}`);
-        }
-    }
-
-    /**
-     * Converte valor do Excel para string preservando o valor original
+     * Converte qualquer valor para string preservando o valor original
+     * Trata valores nulos e indefinidos retornando string vazia
      */
     private parseValueToString(value: any): string {
         if (value === null || value === undefined) return '';
@@ -89,7 +60,95 @@ export class IcecService {
     }
 
     /**
-     * Extrai os metadados completos da planilha ICEC
+     * Constrói a URL completa para download do arquivo Excel ICEC
+     * @param mes Mês do período desejado (1-12)
+     * @param ano Ano do período desejado
+     * @param regiao Região do arquivo (padrão: 'BR')
+     * @returns URL completa do arquivo
+     */
+    private buildUrl(mes: number, ano: number, regiao: string = 'BR'): string {
+        return `${this.baseUrl}/${mes}_${ano}/ICEC/${regiao}.xls`;
+    }
+
+    // ========================================
+    // SEÇÃO 2: MÉTODOS DE ARQUIVOS E DOWNLOAD
+    // ========================================
+
+    /**
+     * Localiza um arquivo de planilha Excel já baixado na pasta temporária
+     * @param regiao Região do arquivo (ex: 'BR', 'SP')
+     * @param mes Mês do período (1-12)
+     * @param ano Ano do período
+     * @returns Caminho completo do arquivo se encontrado, null caso contrário
+     */
+    private async findExistingExcelFile(regiao: string, mes: number, ano: number): Promise<string | null> {
+        try {
+            const files = await fs.readdir(this.TEMP_DIR);
+
+            // Padrão do nome: icec_REGIAO_MESANO_timestamp.xls
+            // Exemplo: icec_BR_62025_1735123456789.xls
+            const pattern = `icec_${regiao}_${mes}${ano}_`;
+
+            const matchingFile = files.find(file =>
+                file.startsWith(pattern) && file.endsWith('.xls')
+            );
+
+            if (matchingFile) {
+                const fullPath = path.join(this.TEMP_DIR, matchingFile);
+                console.log(`📁 Arquivo encontrado: ${matchingFile}`);
+                return fullPath;
+            }
+
+            console.log(`⚠️ Arquivo não encontrado para padrão: ${pattern}*.xls`);
+            return null;
+        } catch (error) {
+            console.log(`❌ Erro ao buscar arquivo: ${error}`);
+            return null;
+        }
+    }
+
+    /**
+     * Realiza o download de um arquivo Excel ICEC do servidor remoto
+     * @param url URL completa do arquivo a ser baixado
+     * @param identifier Identificador único para nomenclatura do arquivo
+     * @returns Caminho completo do arquivo baixado
+     */
+    private async downloadExcelFile(url: string, identifier: string): Promise<string> {
+        const fileName = `icec_${identifier}_${Date.now()}.xls`;
+        const filePath = path.join(this.TEMP_DIR, fileName);
+
+        try {
+            const response = await axios({
+                method: 'GET',
+                url: url,
+                responseType: 'stream',
+                timeout: this.TIMEOUT,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+
+            const writer = fs.createWriteStream(filePath);
+            response.data.pipe(writer);
+
+            return new Promise((resolve, reject) => {
+                writer.on('finish', () => resolve(filePath));
+                writer.on('error', reject);
+            });
+        } catch (error) {
+            throw new Error(`Erro ao baixar arquivo ICEC (${identifier}): ${error}`);
+        }
+    }
+
+    // ========================================
+    // SEÇÃO 3: MÉTODOS DE METADADOS
+    // ========================================
+
+    /**
+     * Extrai metadados completos de uma planilha ICEC utilizando função otimizada
+     * Processa todos os tipos de índices e seus respectivos valores
+     * @param filePath Caminho completo da planilha Excel
+     * @returns Array de objetos MetadadosIcec com todos os dados estruturados
      */
     private async extractMetadataFromExcel(filePath: string): Promise<MetadadosIcec[]> {
         try {
@@ -132,36 +191,9 @@ export class IcecService {
     }
 
     /**
-     * Localiza um arquivo de planilha já baixado na pasta temporária
-     */
-    private async findExistingExcelFile(regiao: string, mes: number, ano: number): Promise<string | null> {
-        try {
-            const files = await fs.readdir(this.TEMP_DIR);
-
-            // Padrão do nome: icec_REGIAO_MESANO_timestamp.xls
-            // Exemplo: icec_BR_62025_1735123456789.xls
-            const pattern = `icec_${regiao}_${mes}${ano}_`;
-
-            const matchingFile = files.find(file =>
-                file.startsWith(pattern) && file.endsWith('.xls')
-            );
-
-            if (matchingFile) {
-                const fullPath = path.join(this.TEMP_DIR, matchingFile);
-                console.log(`📁 Arquivo encontrado: ${matchingFile}`);
-                return fullPath;
-            }
-
-            console.log(`⚠️ Arquivo não encontrado para padrão: ${pattern}*.xls`);
-            return null;
-        } catch (error) {
-            console.log(`❌ Erro ao buscar arquivo: ${error}`);
-            return null;
-        }
-    }
-
-    /**
-     * Processa metadados para todos os registros ICEC do tipo Planilha
+     * Processa extração de metadados para todos os registros ICEC obtidos via planilha
+     * Localiza arquivos já baixados e extrai metadados detalhados
+     * @param idsIcec Array com IDs dos registros ICEC para processamento de metadados
      */
     private async processMetadataForPlanilhaRecords(idsIcec: string[]): Promise<void> {
         try {
@@ -279,11 +311,14 @@ export class IcecService {
     }
 
     // ========================================
-    // SEÇÃO 2: MÉTODOS DE BANCO DE DADOS
+    // SEÇÃO 4: MÉTODOS DE BANCO DE DADOS
     // ========================================
 
     /**
-     * Salva múltiplos registros ICEC no banco de dados de uma vez (versão otimizada)
+     * Salva múltiplos registros ICEC no banco de dados de forma otimizada
+     * Utiliza operação em lote para melhor performance
+     * @param icecDataList Array de objetos Icec para serem salvos
+     * @returns Array com os IDs dos registros salvos
      */
     private async saveBatchIcecToDatabase(icecDataList: Icec[]): Promise<string[]> {
         try {
@@ -321,7 +356,50 @@ export class IcecService {
     }
 
     /**
-     * Limpa a base de dados ICEC
+     * Salva múltiplos lotes de metadados no banco de dados de forma otimizada
+     * Vincula cada metadado ao seu respectivo registro ICEC
+     * @param metadataToSaveList Lista de lotes de metadados para salvar
+     * @param registrosPlanilha Registros ICEC para vinculação
+     */
+    private async saveBatchMetadataToDatabase(
+        metadataToSaveList: Array<{ metadados: MetadadosIcec[]; icecId: string }>,
+        registrosPlanilha: Icec[]
+    ): Promise<void> {
+        try {
+            const allMetadataToSave: MetadadosIcec[] = [];
+
+            // Preparar todos os metadados para salvar
+            for (const item of metadataToSaveList) {
+                // Buscar o registro ICEC para vincular
+                const icecEntity = registrosPlanilha.find((i) => i.id === item.icecId);
+
+                if (!icecEntity) {
+                    console.log(`⚠️ Registro ICEC com ID ${item.icecId} não encontrado, pulando...`);
+                    continue;
+                }
+
+                // Vincular cada metadado ao registro ICEC
+                for (const metadado of item.metadados) {
+                    metadado.icec = icecEntity;
+                    allMetadataToSave.push(metadado);
+                }
+            }
+
+            // Salvar todos os metadados de uma vez usando saveMany (mais eficiente)
+            if (allMetadataToSave.length > 0) {
+                await metadadosIcecRepository.save(allMetadataToSave);
+                console.log(`📊 Total de metadados salvos: ${allMetadataToSave.length}`);
+            }
+
+        } catch (error) {
+            throw new Error(`Erro ao salvar lotes de metadados ICEC no banco: ${error}`);
+        }
+    }
+
+    /**
+     * Remove todos os dados ICEC e metadados do banco de dados
+     * Respeita a ordem de exclusão para manter integridade referencial
+     * @returns String com log das operações realizadas
      */
     private async cleanDatabase(): Promise<string> {
         try {
@@ -351,11 +429,14 @@ export class IcecService {
     }
 
     // ========================================
-    // SEÇÃO 3: MÉTODOS DE PROCESSAMENTO DE DADOS
+    // SEÇÃO 5: MÉTODOS DE PROCESSAMENTO DE DADOS
     // ========================================
 
     /**
      * Extrai os dados completos ICEC de uma planilha Excel
+     * Busca especificamente pela linha que contém 'Índice (em Pontos)' que representa os dados finais do ICEC
+     * @param filePath Caminho completo do arquivo Excel a ser processado
+     * @returns Objeto Icec com todos os dados extraídos (valores como string)
      */
     private async extractCompleteDataFromExcel(filePath: string): Promise<Icec> {
         try {
@@ -403,52 +484,13 @@ export class IcecService {
     }
 
     // ========================================
-    // SEÇÃO 4: MÉTODOS DE ARQUIVOS
+    // SEÇÃO 6: MÉTODOS DE WEB SCRAPING
     // ========================================
 
     /**
-     * Realiza o download do arquivo Excel ICEC
-     */
-    private async downloadExcelFile(url: string, identifier: string): Promise<string> {
-        const fileName = `icec_${identifier}_${Date.now()}.xls`;
-        const filePath = path.join(this.TEMP_DIR, fileName);
-
-        try {
-            const response = await axios({
-                method: 'GET',
-                url: url,
-                responseType: 'stream',
-                timeout: this.TIMEOUT,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-            });
-
-            const writer = fs.createWriteStream(filePath);
-            response.data.pipe(writer);
-
-            return new Promise((resolve, reject) => {
-                writer.on('finish', () => resolve(filePath));
-                writer.on('error', reject);
-            });
-        } catch (error) {
-            throw new Error(`Erro ao baixar arquivo ICEC (${identifier}): ${error}`);
-        }
-    }
-
-    /**
-     * Constrói a URL para o arquivo Excel ICEC
-     */
-    private buildUrl(mes: number, ano: number, regiao: string = 'BR'): string {
-        return `${this.baseUrl}/${mes}_${ano}/ICEC/${regiao}.xls`;
-    }
-
-    // ========================================
-    // SEÇÃO 5: MÉTODOS DE WEB SCRAPING
-    // ========================================
-
-    /**
-     * Processa valores da tabela ICEC mantendo como string
+     * Processa e valida valores extraídos da tabela ICEC mantendo formato string
+     * @param values Array de strings com os valores da tabela
+     * @returns Objeto com os dados ICEC formatados
      */
     private processIcecTableValues(values: string[]): any {
         console.log('🔄 Processando valores ICEC:', values);
@@ -468,7 +510,8 @@ export class IcecService {
     }
 
     /**
-     * Realiza login no site ICEC
+     * Realiza autenticação no site ICEC utilizando credenciais do ambiente
+     * @param page Instância da página do Playwright
      */
     private async performLogin(page: any): Promise<void> {
         console.log('🔐 Fazendo login no site ICEC...');
@@ -499,7 +542,12 @@ export class IcecService {
     }
 
     /**
-     * Extrai dados do site ICEC via web scraping
+     * Extrai dados ICEC do site via web scraping para um período específico
+     * @param page Instância da página do Playwright
+     * @param mes Mês do período desejado (1-12)
+     * @param ano Ano do período desejado
+     * @param regiao Região dos dados (ex: 'BR', 'SP')
+     * @returns Objeto Icec com dados extraídos via web scraping
      */
     private async extractDataFromWebsite(page: any, mes: number, ano: number, regiao: string): Promise<Icec> {
         console.log(`📊 Extraindo dados do site ICEC para ${regiao} ${mes}/${ano}`);
@@ -534,7 +582,7 @@ export class IcecService {
         await page.waitForTimeout(1000);
 
         // Extrair dados da tabela
-        const tableData = await this.extractTableData(page, mes, ano);
+        const tableData = await this.extractCompleteTableData(page, mes, ano);
 
         const icecData: Icec = {
             MES: mes,
@@ -554,9 +602,13 @@ export class IcecService {
     }
 
     /**
-     * Extrai dados da tabela do site ICEC
+     * Extrai e processa dados específicos da tabela ICEC no site
+     * @param page Instância da página do Playwright
+     * @param mes Mês do período para localização na tabela
+     * @param ano Ano do período para localização na tabela
+     * @returns Dados processados da tabela ICEC
      */
-    private async extractTableData(page: any, mes: number, ano: number): Promise<any> {
+    private async extractCompleteTableData(page: any, mes: number, ano: number): Promise<any> {
         // Mapear mês para formato abreviado em inglês (JUL 25)
         const meses = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
         const mesAbrev = meses[mes - 1];
@@ -623,7 +675,11 @@ export class IcecService {
     }
 
     /**
-     * Versão com monitoramento do retry por web scraping para ICEC
+     * Executa tentativas de recuperação via web scraping para períodos que falharam
+     * Implementa monitoramento detalhado de cada tentativa
+     * @param errorList Lista de erros/períodos para retry
+     * @param tasks Array de tasks para atualização de status
+     * @returns Número de sucessos obtidos via web scraping
      */
     private async retryWithWebScrapingMonitoring(errorList: IErrorService[], tasks: ITask[]): Promise<number> {
         const browser = await chromium.launch({ headless: false });
@@ -690,11 +746,14 @@ export class IcecService {
     }
 
     // ========================================
-    // SEÇÃO 6: MÉTODO PRINCIPAL PÚBLICO
+    // SEÇÃO 7: MÉTODO PRINCIPAL PÚBLICO
     // ========================================
 
     /**
-     * Versão com monitoramento do processamento ICEC
+     * Método principal que executa o processamento completo dos dados ICEC
+     * Inclui download, extração, salvamento, retry via web scraping e processamento de metadados
+     * @param regioes Array de regiões para processamento (padrão: ['BR'])
+     * @returns Objeto IServiceResult com estatísticas completas da execução
      */
     public async processAllIcecDataWithMonitoring(regioes: string[] = ['BR']): Promise<IServiceResult> {
         const startTime = Date.now();
@@ -710,6 +769,7 @@ export class IcecService {
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;
         let erros: IErrorService[] = [];
+        let savedIds: string[] = [];
 
         // Array para acumular todos os dados ICEC antes de salvar
         const icecDataList: Icec[] = [];
@@ -769,12 +829,10 @@ export class IcecService {
             }
         }
 
-        let idsSalvos: string[] = [];
-
         // Salvar todos os registros ICEC de uma vez
         if (icecDataList.length > 0) {
             console.log(`\n💾 Salvando ${icecDataList.length} registros ICEC no banco de dados...`);
-            idsSalvos = await this.saveBatchIcecToDatabase(icecDataList);
+            savedIds = await this.saveBatchIcecToDatabase(icecDataList);
             console.log(`✅ Todos os registros ICEC foram salvos com sucesso!`);
         }
 
@@ -814,9 +872,9 @@ export class IcecService {
         console.log(`Registros por web scraping: ${registrosWebScraping}`);
 
         // Nova etapa: processar metadados para registros do tipo Planilha
-        if (idsSalvos.length) {
+        if (savedIds.length) {
             console.log('\n🔄 Iniciando processamento de metadados ICEC...');
-            await this.processMetadataForPlanilhaRecords(idsSalvos);
+            await this.processMetadataForPlanilhaRecords(savedIds);
         }
 
         // Limpeza da pasta temp ao final da execução

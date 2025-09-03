@@ -2,8 +2,6 @@ import { format } from 'date-fns';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { icfXLSXCompleta, icfXLSXTipo, IPeriod, peicXLSXCompleta, peicXLSXTipo, icecXLSXCompleta, icecXLSXTipo } from './interfaces';
-import { metadadosIcfRepository } from '../database/repositories';
-
 
 /**
  * Gera períodos de janeiro/2010 até o período atual

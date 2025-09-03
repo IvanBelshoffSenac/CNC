@@ -19,16 +19,24 @@ import { In } from 'typeorm';
 
 export class PeicService {
 
+    // ========================================
+    // PROPRIEDADES E CONFIGURAÇÕES
+    // ========================================
+
     private readonly TEMP_DIR = path.join(__dirname, '../../../temp');
     private readonly TIMEOUT = 30000;
     private baseUrl = process.env.BASE_URL || 'https://backend.pesquisascnc.com.br/admin/4/upload';
+
+    // ========================================
+    // CONSTRUTOR E INICIALIZAÇÃO
+    // ========================================
 
     constructor() {
         this.ensureTempDirectory();
     }
 
     /**
-     * Constrói o diretório temporário para armazenar arquivos
+     * Inicializa e garante que o diretório temporário existe para armazenar arquivos
      */
     private async ensureTempDirectory(): Promise<void> {
         try {
@@ -39,96 +47,39 @@ export class PeicService {
     }
 
     // ========================================
-    // SEÇÃO 1: MÉTODOS DE METADADOS
+    // SEÇÃO 1: MÉTODOS UTILITÁRIOS E HELPERS
     // ========================================
 
     /**
-     * Salva múltiplos lotes de metadados no banco de dados de uma vez (versão otimizada)
+     * Converte qualquer valor para string preservando o valor original
+     * Trata valores nulos e indefinidos retornando string vazia
      */
-    private async saveBatchMetadataToDatabase(
-        metadataToSaveList: Array<{ metadados: MetadadosPeic[]; peicId: string }>,
-        registrosPlanilha: Peic[]
-    ): Promise<void> {
-        try {
-            const allMetadataToSave: MetadadosPeic[] = [];
-
-            // Preparar todos os metadados para salvar
-            for (const item of metadataToSaveList) {
-                // Buscar o registro PEIC para vincular
-                const peicEntity = registrosPlanilha.find((i) => i.id === item.peicId);
-
-                if (!peicEntity) {
-                    console.log(`⚠️ Registro PEIC com ID ${item.peicId} não encontrado, pulando...`);
-                    continue;
-                }
-
-                // Vincular cada metadado ao registro PEIC
-                for (const metadado of item.metadados) {
-                    metadado.peic = peicEntity;
-                    allMetadataToSave.push(metadado);
-                }
-            }
-
-            // Salvar todos os metadados de uma vez usando saveMany (mais eficiente)
-            if (allMetadataToSave.length > 0) {
-                await metadadosPeicRepository.save(allMetadataToSave);
-                console.log(`📊 Total de metadados salvos: ${allMetadataToSave.length}`);
-            }
-
-        } catch (error) {
-            throw new Error(`Erro ao salvar lotes de metadados PEIC no banco: ${error}`);
-        }
-    }
-
-    /**
-     * Converte valor do Excel para string preservando o valor original
-     */
-    private parseExcelValueToString(value: any): string {
+    private parseValueToString(value: any): string {
         if (value === null || value === undefined) return '';
         return String(value);
     }
 
     /**
-     * Extrai os metadados completos da planilha PEIC
+     * Constrói a URL completa para download do arquivo Excel PEIC
+     * @param mes Mês do período desejado (1-12)
+     * @param ano Ano do período desejado
+     * @param regiao Região do arquivo (padrão: 'BR')
+     * @returns URL completa do arquivo
      */
-    private async extractMetadataFromExcel(filePath: string): Promise<MetadadosPeic[]> {
-        try {
-            const workbook = XLSX.readFile(filePath);
-            const sheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[sheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
-
-            // Usar a função otimizada para extrair dados estruturados
-            const peicCompleta = transformJsonToPEIC(jsonData);
-
-            // Converter para o formato MetadadosPeic
-            const metadados: MetadadosPeic[] = [];
-
-            for (const tipo of peicCompleta.peictableTipo) {
-                for (const valor of tipo.valores) {
-                    const metadado = new MetadadosPeic();
-                    metadado.TIPOINDICE = tipo.tipo;
-                    metadado.CAMPO = valor.tipo;
-
-                    // Salvar dados brutos como string
-                    metadado.TOTAL = this.parseExcelValueToString(valor.total);
-                    metadado.ATE_10_SM = this.parseExcelValueToString(valor["até 10sm - %"]);
-                    metadado.MAIS_DE_10_SM = this.parseExcelValueToString(valor["mais de 10sm - %"]);
-                    metadado.NUMERO_ABSOLUTO = this.parseExcelValueToString(valor["Numero Absoluto"]);
-
-                    metadados.push(metadado);
-                }
-            }
-
-            return metadados;
-
-        } catch (error) {
-            throw new Error(`Erro ao extrair metadados da planilha PEIC: ${error}`);
-        }
+    private buildUrl(mes: number, ano: number, regiao: string = 'BR'): string {
+        return `${this.baseUrl}/${mes}_${ano}/PEIC/${regiao}.xls`;
     }
 
+    // ========================================
+    // SEÇÃO 2: MÉTODOS DE ARQUIVOS E DOWNLOAD
+    // ========================================
+
     /**
-     * Localiza um arquivo de planilha já baixado na pasta temporária
+     * Localiza um arquivo de planilha Excel já baixado na pasta temporária
+     * @param regiao Região do arquivo (ex: 'BR', 'SP')
+     * @param mes Mês do período (1-12)
+     * @param ano Ano do período
+     * @returns Caminho completo do arquivo se encontrado, null caso contrário
      */
     private async findExistingExcelFile(regiao: string, mes: number, ano: number): Promise<string | null> {
         try {
@@ -157,7 +108,88 @@ export class PeicService {
     }
 
     /**
-     * Processa metadados para todos os registros PEIC do tipo Planilha
+     * Realiza o download de um arquivo Excel PEIC do servidor remoto
+     * @param url URL completa do arquivo a ser baixado
+     * @param identifier Identificador único para nomenclatura do arquivo
+     * @returns Caminho completo do arquivo baixado
+     */
+    private async downloadExcelFile(url: string, identifier: string): Promise<string> {
+        const fileName = `peic_${identifier}_${Date.now()}.xls`;
+        const filePath = path.join(this.TEMP_DIR, fileName);
+
+        try {
+            const response = await axios({
+                method: 'GET',
+                url: url,
+                responseType: 'stream',
+                timeout: this.TIMEOUT,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+
+            const writer = fs.createWriteStream(filePath);
+            response.data.pipe(writer);
+
+            return new Promise((resolve, reject) => {
+                writer.on('finish', () => resolve(filePath));
+                writer.on('error', reject);
+            });
+        } catch (error) {
+            throw new Error(`Erro ao baixar arquivo PEIC (${identifier}): ${error}`);
+        }
+    }
+
+    // ========================================
+    // SEÇÃO 3: MÉTODOS DE METADADOS
+    // ========================================
+
+    /**
+     * Extrai metadados completos de uma planilha PEIC utilizando função otimizada
+     * Processa todos os tipos de índices e seus respectivos valores
+     * @param filePath Caminho completo da planilha Excel
+     * @returns Array de objetos MetadadosPeic com todos os dados estruturados
+     */
+    private async extractMetadataFromExcel(filePath: string): Promise<MetadadosPeic[]> {
+        try {
+            const workbook = XLSX.readFile(filePath);
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
+
+            // Usar a função otimizada para extrair dados estruturados
+            const peicCompleta = transformJsonToPEIC(jsonData);
+
+            // Converter para o formato MetadadosPeic
+            const metadados: MetadadosPeic[] = [];
+
+            for (const tipo of peicCompleta.peictableTipo) {
+                for (const valor of tipo.valores) {
+                    const metadado = new MetadadosPeic();
+                    metadado.TIPOINDICE = tipo.tipo;
+                    metadado.CAMPO = valor.tipo;
+
+                    // Salvar dados brutos como string
+                    metadado.TOTAL = valor.total || '';
+                    metadado.ATE_10_SM = valor["até 10sm - %"] || '';
+                    metadado.MAIS_DE_10_SM = valor["mais de 10sm - %"] || '';
+                    metadado.NUMERO_ABSOLUTO = valor["Numero Absoluto"] || '';
+
+                    metadados.push(metadado);
+                }
+            }
+
+            return metadados;
+
+        } catch (error) {
+            throw new Error(`Erro ao extrair metadados da planilha PEIC: ${error}`);
+        }
+    }
+
+    /**
+     * Processa extração de metadados para todos os registros PEIC obtidos via planilha
+     * Localiza arquivos já baixados e extrai metadados detalhados
+     * @param idsPeic Array com IDs dos registros PEIC para processamento de metadados
      */
     private async processMetadataForPlanilhaRecords(idsPeic: string[]): Promise<void> {
         try {
@@ -275,11 +307,14 @@ export class PeicService {
     }
 
     // ========================================
-    // SEÇÃO 2: MÉTODOS DE BANCO DE DADOS
+    // SEÇÃO 4: MÉTODOS DE BANCO DE DADOS
     // ========================================
 
     /**
-     * Salva múltiplos registros PEIC no banco de dados de uma vez (versão otimizada)
+     * Salva múltiplos registros PEIC no banco de dados de forma otimizada
+     * Utiliza operação em lote para melhor performance
+     * @param peicDataList Array de objetos Peic para serem salvos
+     * @returns Array com os IDs dos registros salvos
      */
     private async saveBatchPeicToDatabase(peicDataList: Peic[]): Promise<string[]> {
         try {
@@ -317,7 +352,50 @@ export class PeicService {
     }
 
     /**
-     * Limpa a base de dados PEIC
+     * Salva múltiplos lotes de metadados no banco de dados de forma otimizada
+     * Vincula cada metadado ao seu respectivo registro PEIC
+     * @param metadataToSaveList Lista de lotes de metadados para salvar
+     * @param registrosPlanilha Registros PEIC para vinculação
+     */
+    private async saveBatchMetadataToDatabase(
+        metadataToSaveList: Array<{ metadados: MetadadosPeic[]; peicId: string }>,
+        registrosPlanilha: Peic[]
+    ): Promise<void> {
+        try {
+            const allMetadataToSave: MetadadosPeic[] = [];
+
+            // Preparar todos os metadados para salvar
+            for (const item of metadataToSaveList) {
+                // Buscar o registro PEIC para vincular
+                const peicEntity = registrosPlanilha.find((i) => i.id === item.peicId);
+
+                if (!peicEntity) {
+                    console.log(`⚠️ Registro PEIC com ID ${item.peicId} não encontrado, pulando...`);
+                    continue;
+                }
+
+                // Vincular cada metadado ao registro PEIC
+                for (const metadado of item.metadados) {
+                    metadado.peic = peicEntity;
+                    allMetadataToSave.push(metadado);
+                }
+            }
+
+            // Salvar todos os metadados de uma vez usando saveMany (mais eficiente)
+            if (allMetadataToSave.length > 0) {
+                await metadadosPeicRepository.save(allMetadataToSave);
+                console.log(`📊 Total de metadados salvos: ${allMetadataToSave.length}`);
+            }
+
+        } catch (error) {
+            throw new Error(`Erro ao salvar lotes de metadados PEIC no banco: ${error}`);
+        }
+    }
+
+    /**
+     * Remove todos os dados PEIC e metadados do banco de dados
+     * Respeita a ordem de exclusão para manter integridade referencial
+     * @returns String com log das operações realizadas
      */
     private async cleanDatabase(): Promise<string> {
         try {
@@ -347,100 +425,14 @@ export class PeicService {
     }
 
     // ========================================
-    // SEÇÃO 3: MÉTODOS DE PROCESSAMENTO DE DADOS
+    // SEÇÃO 5: MÉTODOS DE PROCESSAMENTO DE DADOS
     // ========================================
 
     /**
-     * Processa os valores da tabela PEIC do web scraping.
-     */
-    private processTableValues(values: string[]): any {
-        console.log('🔄 Processando valores PEIC:', values);
-
-        if (values.length < 6) {
-            throw new Error(`Dados PEIC insuficientes. Esperado: 6 valores, Encontrado: ${values.length}`);
-        }
-
-        return {
-            ENDIVIDADOS_PERCENTUAL: this.parseValueToString(values[0]),
-            CONTAS_EM_ATRASO_PERCENTUAL: this.parseValueToString(values[1]),
-            NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL: this.parseValueToString(values[2]),
-            ENDIVIDADOS_ABSOLUTO: this.parseValueToString(values[3]),
-            CONTAS_EM_ATRASO_ABSOLUTO: this.parseValueToString(values[4]),
-            NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO: this.parseValueToString(values[5])
-        };
-    }
-
-    /**
-     * Extrai os dados da tabela PEIC para um determinado mês e ano.
-     */
-    private async extractTableData(page: any, mes: number, ano: number): Promise<any> {
-        // Mapear mês para formato abreviado em inglês (JUL 25)
-        const meses = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-        const mesAbrev = meses[mes - 1];
-        const anoAbrev = ano.toString().slice(-2); // Pegar últimos 2 dígitos
-        const periodoTarget = `${mesAbrev} ${anoAbrev}`;
-
-        console.log(`🔍 Procurando período PEIC: ${periodoTarget}`);
-
-        try {
-            // Usar abordagem similar ao código legado do ICEC
-            const table = await page.frameLocator('#dadosPesquisa').getByRole('table');
-            const rows = await table.locator('tr');
-
-            // Extrair todos os dados da tabela
-            const data = await rows.allInnerTexts();
-            console.log(`✅ Dados extraídos: ${data.length} linhas`);
-
-            // Filtrar e processar os dados
-            for (let i = 0; i < data.length; i++) {
-                const rowData = data[i];
-                if (rowData && rowData.includes(periodoTarget)) {
-                    console.log(`✅ Período encontrado: ${periodoTarget}`);
-                    console.log(`📊 Dados da linha: ${rowData}`);
-
-                    // Dividir por tab ou espaços múltiplos
-                    const values = rowData.split(/\t+/).filter(val => val.trim() !== '');
-
-                    console.log('📊 Valores separados:', values);
-
-                    // Validar se temos pelo menos 7 valores (período + 6 dados)
-                    if (values.length < 7) {
-                        console.log('⚠️ Tentando separação alternativa por espaços múltiplos');
-                        const altValues = rowData.split(/\s{2,}/).filter(val => val.trim() !== '');
-                        console.log('📊 Valores alternativos:', altValues);
-
-                        if (altValues.length >= 7) {
-                            return this.processTableValues(altValues.slice(1)); // Pular a primeira coluna (período)
-                        } else {
-                            throw new Error(`Dados insuficientes na tabela. Esperado: 7 valores, Encontrado: ${altValues.length}`);
-                        }
-                    }
-
-                    return this.processTableValues(values.slice(1)); // Pular a primeira coluna (período)
-                }
-            }
-
-            // Se não encontrou o período, mostrar períodos disponíveis
-            console.log('🔍 Períodos disponíveis na tabela PEIC:');
-            data.forEach((rowData: string) => {
-                if (rowData && rowData.trim()) {
-                    const firstValue = rowData.split(/[\t\s]+/)[0];
-                    if (firstValue && firstValue.match(/[A-Z]{3}\s?\d{2}/)) {
-                        console.log(`   - "${firstValue.trim()}"`);
-                    }
-                }
-            });
-
-            throw new Error(`Período ${periodoTarget} não encontrado na tabela PEIC`);
-
-        } catch (error) {
-            console.error('❌ Erro ao extrair dados da tabela PEIC:', error);
-            throw error;
-        }
-    }
-
-    /**
      * Extrai os dados completos PEIC de uma planilha Excel
+     * Busca especificamente pelas seções PEIC (Percentual) e PEIC (Síntese)
+     * @param filePath Caminho completo do arquivo Excel a ser processado
+     * @returns Objeto Peic com todos os dados extraídos (valores como string)
      */
     private async extractCompleteDataFromExcel(filePath: string): Promise<Peic> {
         try {
@@ -519,36 +511,70 @@ export class PeicService {
     }
 
     // ========================================
-    // SEÇÃO 4: MÉTODOS AUXILIARES DE PARSE
+    // SEÇÃO 6: MÉTODOS DE WEB SCRAPING
     // ========================================
 
     /**
-     * Converte qualquer valor para string preservando o valor original
+     * Processa e valida valores extraídos da tabela PEIC mantendo formato string
+     * @param values Array de strings com os valores da tabela (6 valores: 3 percentuais + 3 absolutos)
+     * @returns Objeto com os dados PEIC formatados
      */
-    private parseValueToString(value: any): string {
-        if (value === null || value === undefined) return '';
-        return String(value);
-    }
+    private processPeicTableValues(values: string[]): any {
+        console.log('🔄 Processando valores PEIC:', values);
 
-    private isValidPeicData(data: Partial<Peic>): data is Peic {
-        return (
-            typeof data.ENDIVIDADOS_PERCENTUAL === 'string' &&
-            typeof data.CONTAS_EM_ATRASO_PERCENTUAL === 'string' &&
-            typeof data.NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL === 'string' &&
-            typeof data.ENDIVIDADOS_ABSOLUTO === 'string' &&
-            typeof data.CONTAS_EM_ATRASO_ABSOLUTO === 'string' &&
-            typeof data.NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO === 'string' &&
-            typeof data.MES === 'number' &&
-            typeof data.ANO === 'number'
-        );
-    }
+        if (values.length < 6) {
+            throw new Error(`Dados PEIC insuficientes. Esperado: 6 valores, Encontrado: ${values.length}`);
+        }
 
-    // ========================================
-    // SEÇÃO 5: MÉTODOS DE WEB SCRAPING
-    // ========================================
+        return {
+            ENDIVIDADOS_PERCENTUAL: this.parseValueToString(values[0]),
+            CONTAS_EM_ATRASO_PERCENTUAL: this.parseValueToString(values[1]),
+            NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL: this.parseValueToString(values[2]),
+            ENDIVIDADOS_ABSOLUTO: this.parseValueToString(values[3]),
+            CONTAS_EM_ATRASO_ABSOLUTO: this.parseValueToString(values[4]),
+            NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO: this.parseValueToString(values[5])
+        };
+    }
 
     /**
-     * Extrai dados do website PEIC para um período específico
+     * Realiza autenticação no site PEIC utilizando credenciais do ambiente
+     * @param page Instância da página do Playwright
+     */
+    private async performLogin(page: any): Promise<void> {
+        console.log('🔐 Fazendo login no site PEIC...');
+
+        const baseUrl = process.env.BASE_URL_SITE_PEIC || 'https://pesquisascnc.com.br/pesquisa-peic/';
+
+        await page.goto(baseUrl);
+        console.log('✅ Página carregada');
+
+        // Aguardar os campos de login aparecerem
+        await page.waitForSelector('#log');
+        await page.waitForSelector('#pwd');
+
+        // Preencher credenciais usando os IDs corretos
+        await page.fill('#log', process.env.CREDENTIALS_USER || '');
+        console.log('✅ Email preenchido');
+
+        await page.fill('#pwd', process.env.CREDENTIALS_PASSWORD || '');
+        console.log('✅ Senha preenchida');
+
+        // Clicar no botão de login usando o ID correto
+        await page.click('#actionLogin');
+        console.log('✅ Login realizado');
+
+        // Aguardar o formulário de pesquisa aparecer (confirma que o login foi bem-sucedido)
+        await page.waitForSelector('#formPesquisa', { timeout: 10000 });
+        console.log('✅ Login confirmado - formulário de pesquisa carregado');
+    }
+
+    /**
+     * Extrai dados PEIC do site via web scraping para um período específico
+     * @param page Instância da página do Playwright
+     * @param mes Mês do período desejado (1-12)
+     * @param ano Ano do período desejado
+     * @param regiao Região dos dados (ex: 'BR', 'SP')
+     * @returns Objeto Peic com dados extraídos via web scraping
      */
     private async extractDataFromWebsite(page: any, mes: number, ano: number, regiao: string): Promise<Peic> {
         console.log(`📊 Extraindo dados do site PEIC para ${regiao} ${mes}/${ano}`);
@@ -583,7 +609,7 @@ export class PeicService {
         await page.waitForTimeout(1000);
 
         // Extrair dados da tabela
-        const tableData = await this.extractTableData(page, mes, ano);
+        const tableData = await this.extractCompleteTableData(page, mes, ano);
 
         const peicData: Peic = {
             MES: mes,
@@ -603,38 +629,84 @@ export class PeicService {
     }
 
     /**
-     * Realiza o login no site PEIC usando Playwright
+     * Extrai e processa dados específicos da tabela PEIC no site
+     * @param page Instância da página do Playwright
+     * @param mes Mês do período para localização na tabela
+     * @param ano Ano do período para localização na tabela
+     * @returns Dados processados da tabela PEIC
      */
-    private async performLogin(page: any): Promise<void> {
-        console.log('🔐 Fazendo login no site PEIC...');
+    private async extractCompleteTableData(page: any, mes: number, ano: number): Promise<any> {
+        // Mapear mês para formato abreviado em inglês (JUL 25)
+        const meses = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const mesAbrev = meses[mes - 1];
+        const anoAbrev = ano.toString().slice(-2); // Pegar últimos 2 dígitos
+        const periodoTarget = `${mesAbrev} ${anoAbrev}`;
 
-        const baseUrl = process.env.BASE_URL_SITE_PEIC || 'https://pesquisascnc.com.br/pesquisa-peic/';
+        console.log(`🔍 Procurando período PEIC: ${periodoTarget}`);
 
-        await page.goto(baseUrl);
-        console.log('✅ Página carregada');
+        try {
+            // Usar abordagem similar aos outros serviços
+            const table = await page.frameLocator('#dadosPesquisa').getByRole('table');
+            const rows = await table.locator('tr');
 
-        // Aguardar os campos de login aparecerem
-        await page.waitForSelector('#log');
-        await page.waitForSelector('#pwd');
+            // Extrair todos os dados da tabela
+            const data = await rows.allInnerTexts();
+            console.log(`✅ Dados extraídos: ${data.length} linhas`);
 
-        // Preencher credenciais usando os IDs corretos
-        await page.fill('#log', process.env.CREDENTIALS_USER || '');
-        console.log('✅ Email preenchido');
+            // Filtrar e processar os dados
+            for (let i = 0; i < data.length; i++) {
+                const rowData = data[i];
+                if (rowData && rowData.includes(periodoTarget)) {
+                    console.log(`✅ Período encontrado: ${periodoTarget}`);
+                    console.log(`📊 Dados da linha: ${rowData}`);
 
-        await page.fill('#pwd', process.env.CREDENTIALS_PASSWORD || '');
-        console.log('✅ Senha preenchida');
+                    // Dividir por tab ou espaços múltiplos
+                    const values = rowData.split(/\t+/).filter(val => val.trim() !== '');
 
-        // Clicar no botão de login usando o ID correto
-        await page.click('#actionLogin');
-        console.log('✅ Login realizado');
+                    console.log('📊 Valores separados:', values);
 
-        // Aguardar o formulário de pesquisa aparecer (confirma que o login foi bem-sucedido)
-        await page.waitForSelector('#formPesquisa', { timeout: 10000 });
-        console.log('✅ Login confirmado - formulário de pesquisa carregado');
+                    // Validar se temos pelo menos 7 valores (período + 6 dados)
+                    if (values.length < 7) {
+                        console.log('⚠️ Tentando separação alternativa por espaços múltiplos');
+                        const altValues = rowData.split(/\s{2,}/).filter(val => val.trim() !== '');
+                        console.log('📊 Valores alternativos:', altValues);
+
+                        if (altValues.length >= 7) {
+                            return this.processPeicTableValues(altValues.slice(1)); // Pular a primeira coluna (período)
+                        } else {
+                            throw new Error(`Dados insuficientes na tabela. Esperado: 7 valores, Encontrado: ${altValues.length}`);
+                        }
+                    }
+
+                    return this.processPeicTableValues(values.slice(1)); // Pular a primeira coluna (período)
+                }
+            }
+
+            // Se não encontrou o período, mostrar períodos disponíveis
+            console.log('🔍 Períodos disponíveis na tabela PEIC:');
+            data.forEach((rowData: string) => {
+                if (rowData && rowData.trim()) {
+                    const firstValue = rowData.split(/[\t\s]+/)[0];
+                    if (firstValue && firstValue.match(/[A-Z]{3}\s?\d{2}/)) {
+                        console.log(`   - "${firstValue.trim()}"`);
+                    }
+                }
+            });
+
+            throw new Error(`Período ${periodoTarget} não encontrado na tabela PEIC`);
+
+        } catch (error) {
+            console.error('❌ Erro ao extrair dados da tabela PEIC:', error);
+            throw error;
+        }
     }
 
     /**
-     * Versão com monitoramento do retry por web scraping para PEIC
+     * Executa tentativas de recuperação via web scraping para períodos que falharam
+     * Implementa monitoramento detalhado de cada tentativa
+     * @param errorList Lista de erros/períodos para retry
+     * @param tasks Array de tasks para atualização de status
+     * @returns Número de sucessos obtidos via web scraping
      */
     private async retryWithWebScrapingMonitoring(errorList: IErrorService[], tasks: ITask[]): Promise<number> {
         const browser = await chromium.launch({ headless: false });
@@ -650,14 +722,14 @@ export class PeicService {
 
             for (const error of errorList) {
                 try {
-                    console.log(`🌐 Tentando web scraping para PEIC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
+                    console.log(LogMessages.webScrapingInicio('PEIC', error.regiao, error.mes, error.ano));
 
                     const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
 
                     // Acumular dados em vez de salvar imediatamente
                     webScrapingDataList.push(data);
 
-                    console.log(`✅ Web scraping bem-sucedido: PEIC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
+                    console.log(LogMessages.webScrapingSucesso('PEIC', error.regiao, error.mes, error.ano));
                     sucessosWebScraping++;
 
                     // Atualizar task correspondente para sucesso
@@ -675,7 +747,7 @@ export class PeicService {
                     }
 
                 } catch (scrapingError) {
-                    console.log(`❌ Falha no web scraping: PEIC ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano} - ${scrapingError}`);
+                    console.log(LogMessages.webScrapingFalha('PEIC', error.regiao, error.mes, error.ano, scrapingError));
 
                     // Atualizar erro na task
                     const taskIndex = tasks.findIndex(t =>
@@ -711,140 +783,14 @@ export class PeicService {
     }
 
     // ========================================
-    // SEÇÃO 6: MÉTODOS DE ARQUIVOS
+    // SEÇÃO 7: MÉTODO PRINCIPAL PÚBLICO
     // ========================================
 
     /**
-     * Realiza o download do arquivo Excel PEIC
-     */
-    private async downloadExcelFile(url: string, identifier: string): Promise<string> {
-        const fileName = `peic_${identifier}_${Date.now()}.xls`;
-        const filePath = path.join(this.TEMP_DIR, fileName);
-
-        try {
-            const response = await axios({
-                method: 'GET',
-                url: url,
-                responseType: 'stream',
-                timeout: this.TIMEOUT,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-            });
-
-            const writer = fs.createWriteStream(filePath);
-            response.data.pipe(writer);
-
-            return new Promise((resolve, reject) => {
-                writer.on('finish', () => resolve(filePath));
-                writer.on('error', reject);
-            });
-        } catch (error) {
-            throw new Error(`Erro ao baixar arquivo PEIC (${identifier}): ${error}`);
-        }
-    }
-
-    /**
-     * Constrói a URL para o arquivo Excel PEIC
-     */
-    private buildUrl(mes: number, ano: number, regiao: string = 'BR'): string {
-        return `${this.baseUrl}/${mes}_${ano}/PEIC/${regiao}.xls`;
-    }
-
-    // ========================================
-    // SEÇÃO 7: MÉTODOS AUXILIARES (LEGACY)
-    // ========================================
-
-    private async saveToDatabase(data: Peic): Promise<void> {
-        try {
-            const peicEntity = new Peic();
-            peicEntity.ENDIVIDADOS_PERCENTUAL = data.ENDIVIDADOS_PERCENTUAL;
-            peicEntity.CONTAS_EM_ATRASO_PERCENTUAL = data.CONTAS_EM_ATRASO_PERCENTUAL;
-            peicEntity.NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL = data.NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL;
-            peicEntity.ENDIVIDADOS_ABSOLUTO = data.ENDIVIDADOS_ABSOLUTO;
-            peicEntity.CONTAS_EM_ATRASO_ABSOLUTO = data.CONTAS_EM_ATRASO_ABSOLUTO;
-            peicEntity.NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO = data.NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO;
-            peicEntity.MES = data.MES;
-            peicEntity.ANO = data.ANO;
-            peicEntity.REGIAO = data.REGIAO;
-            peicEntity.METODO = data.METODO;
-
-            await peicRepository.save(peicEntity);
-        } catch (error) {
-            throw new Error(`Erro ao salvar PEIC no banco: ${error}`);
-        }
-    }
-
-    // Método público para testar web scraping
-    public async testWebScrapingSinglePeriod(mes: number, ano: number, regiao: string = 'BR'): Promise<void> {
-        const browser = await chromium.launch({ headless: false });
-
-        try {
-            const page = await browser.newPage();
-
-            // Fazer login
-            await this.performLogin(page);
-
-            console.log(`🌐 Testando web scraping para ${regiao} ${mes.toString().padStart(2, '0')}/${ano}`);
-
-            const data = await this.extractDataFromWebsite(page, mes, ano, regiao);
-            await this.saveToDatabase(data);
-
-            console.log(`✅ Web scraping bem-sucedido: ${regiao} ${mes.toString().padStart(2, '0')}/${ano}`);
-            console.log('📈 Dados salvos:', data);
-
-        } catch (error) {
-            console.log(`❌ Falha no web scraping: ${regiao} ${mes.toString().padStart(2, '0')}/${ano} - ${error}`);
-            throw error;
-        } finally {
-            await browser.close();
-        }
-    }
-
-    private async retryWithWebScraping(errorList: IErrorService[]): Promise<void> {
-        const browser = await chromium.launch({ headless: false });
-
-        try {
-            const page = await browser.newPage();
-
-            // Fazer login
-            await this.performLogin(page);
-
-            let sucessosWebScraping = 0;
-            let errosWebScraping = 0;
-
-            for (const error of errorList) {
-                try {
-                    console.log(`🌐 Tentando web scraping para ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
-
-                    const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
-                    await this.saveToDatabase(data);
-
-                    console.log(`✅ Web scraping bem-sucedido: ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano}`);
-                    sucessosWebScraping++;
-
-                } catch (scrapingError) {
-                    console.log(`❌ Falha no web scraping: ${error.regiao} ${error.mes.toString().padStart(2, '0')}/${error.ano} - ${scrapingError}`);
-                    errosWebScraping++;
-                }
-            }
-
-            console.log(`\n=== Resultado do Web Scraping ===`);
-            console.log(`Sucessos: ${sucessosWebScraping}`);
-            console.log(`Erros: ${errosWebScraping}`);
-            console.log(`Total tentativas: ${errorList.length}`);
-
-        } finally {
-            await browser.close();
-        }
-    }
-
-    // ========================================
-    // SEÇÃO 8: MÉTODO PRINCIPAL PÚBLICO
-    // ========================================
-
-    /**
-     * Versão com monitoramento do processamento PEIC
+     * Método principal que executa o processamento completo dos dados PEIC
+     * Inclui download, extração, salvamento, retry via web scraping e processamento de metadados
+     * @param regioes Array de regiões para processamento (padrão: ['BR'])
+     * @returns Objeto IServiceResult com estatísticas completas da execução
      */
     public async processAllPeicDataWithMonitoring(regioes: string[] = ['BR']): Promise<IServiceResult> {
         const startTime = Date.now();
@@ -860,6 +806,7 @@ export class PeicService {
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;
         let erros: IErrorService[] = [];
+        let savedIds: string[] = [];
 
         // Array para acumular todos os dados PEIC antes de salvar
         const peicDataList: Peic[] = [];
@@ -872,7 +819,7 @@ export class PeicService {
                     const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
                     const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}`);
 
-                    // Extrair dados completos diretamente da planilha (pontos + percentuais)
+                    // Extrair dados completos diretamente da planilha (percentuais + absolutos)
                     const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
 
                     const peicData: Peic = {
@@ -919,12 +866,10 @@ export class PeicService {
             }
         }
 
-        let idsSalvos: string[] = [];
-
         // Salvar todos os registros PEIC de uma vez
         if (peicDataList.length > 0) {
             console.log(`\n💾 Salvando ${peicDataList.length} registros PEIC no banco de dados...`);
-            idsSalvos = await this.saveBatchPeicToDatabase(peicDataList);
+            savedIds = await this.saveBatchPeicToDatabase(peicDataList);
             console.log(`✅ Todos os registros PEIC foram salvos com sucesso!`);
         }
 
@@ -964,9 +909,9 @@ export class PeicService {
         console.log(`Registros por web scraping: ${registrosWebScraping}`);
 
         // Nova etapa: processar metadados para registros do tipo Planilha
-        if (idsSalvos.length) {
+        if (savedIds.length) {
             console.log('\n🔄 Iniciando processamento de metadados PEIC...');
-            await this.processMetadataForPlanilhaRecords(idsSalvos);
+            await this.processMetadataForPlanilhaRecords(savedIds);
         }
 
         // Limpeza da pasta temp ao final da execução
@@ -975,5 +920,3 @@ export class PeicService {
         return resultado;
     }
 }
-
-export const peicService = new PeicService();

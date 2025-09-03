@@ -367,14 +367,6 @@ export class TaskOrchestrator {
     }
 
     /**
-     * Método para testar o sistema de notificação
-     */
-    public async testNotification(): Promise<void> {
-        console.log('🧪 Testando sistema de notificação...');
-        await this.notificationService.testarNotificacao();
-    }
-
-    /**
      * Retorna status da execução
      */
     public getStatus(): { isRunning: boolean; nextExecutions: string[]; servicesEnabled: string[] } {
