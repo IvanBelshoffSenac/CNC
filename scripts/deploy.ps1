@@ -1,91 +1,83 @@
 # =================================================================
-# SCRIPT DE DEPLOY DOCKER SIMPLIFICADO - SISTEMA CNC
+# SCRIPT DE DEPLOY DOCKER - IMAGEM OFICIAL PLAYWRIGHT
 # =================================================================
 
-# Configurar codificação UTF-8
+param()
+
+# Configurar codificacao UTF-8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-# Cores para output
+# Cores
 $ColorSuccess = "Green"
 $ColorError = "Red"
 $ColorWarning = "Yellow"
 $ColorInfo = "Cyan"
 
 function Write-Success($message) {
-    Write-Host "✅ $message" -ForegroundColor $ColorSuccess
+    Write-Host "[OK] $message" -ForegroundColor $ColorSuccess
 }
 
 function Write-Error($message) {
-    Write-Host "❌ $message" -ForegroundColor $ColorError
+    Write-Host "[ERRO] $message" -ForegroundColor $ColorError
 }
 
 function Write-Warning($message) {
-    Write-Host "⚠️  $message" -ForegroundColor $ColorWarning
+    Write-Host "[AVISO] $message" -ForegroundColor $ColorWarning
 }
 
 function Write-Info($message) {
-    Write-Host "ℹ️  $message" -ForegroundColor $ColorInfo
+    Write-Host "[INFO] $message" -ForegroundColor $ColorInfo
 }
 
 # Header
 Clear-Host
-Write-Host "=================================" -ForegroundColor $ColorInfo
-Write-Host "SISTEMA CNC - DEPLOY SIMPLIFICADO" -ForegroundColor $ColorInfo
-Write-Host "=================================" -ForegroundColor $ColorInfo
+Write-Host "DEPLOY DOCKER CNC - IMAGEM OFICIAL PLAYWRIGHT" -ForegroundColor $ColorInfo
+Write-Host "==============================================" -ForegroundColor $ColorInfo
 
 # Verificar Docker
 try {
-    $null = docker --version
+    docker --version | Out-Null
     Write-Success "Docker encontrado"
 }
 catch {
-    Write-Error "Docker não está instalado!"
+    Write-Error "Docker nao encontrado!"
+    Write-Host "Instale o Docker Desktop: https://www.docker.com/products/docker-desktop" -ForegroundColor Yellow
     Read-Host "Pressione Enter para sair..."
     exit 1
 }
 
 # Verificar .env.docker
 if (-not (Test-Path ".env.docker")) {
-    Write-Warning "Arquivo .env.docker não encontrado!"
+    Write-Error "Arquivo .env.docker nao encontrado!"
     
     if (Test-Path ".env.docker.example") {
-        Write-Host "Copiando .env.docker.example para .env.docker..." -ForegroundColor Yellow
+        Write-Warning "Copiando .env.docker.example para .env.docker..."
         Copy-Item ".env.docker.example" ".env.docker"
-        Write-Warning "IMPORTANTE: Edite o arquivo .env.docker com suas configurações específicas!"
-        Write-Host "Configure: HOST, DB_USER, PASSWORD, CREDENTIALS_*, MAIL_* etc." -ForegroundColor Yellow
-        Read-Host "Pressione Enter para continuar após editar o .env.docker..."
+        Write-Warning "IMPORTANTE: Edite o arquivo .env.docker com suas configuracoes especificas!"
+        Write-Info "Configure: HOST, DB_USER, PASSWORD, CREDENTIALS_*, MAIL_* etc."
+        Read-Host "Pressione Enter para continuar apos editar o .env.docker..."
     } elseif (Test-Path ".env") {
-        Write-Host "Copiando .env para .env.docker..." -ForegroundColor Yellow
+        Write-Warning "Copiando .env para .env.docker..."
         Copy-Item ".env" ".env.docker"
         Write-Warning "IMPORTANTE: Edite o .env.docker removendo aspas duplas dos valores!"
-        Read-Host "Pressione Enter para continuar após editar o .env.docker..."
+        Read-Host "Pressione Enter para continuar apos editar o .env.docker..."
     } else {
-        Write-Error "Nenhum arquivo de configuração encontrado!"
-        Write-Host "Crie um arquivo .env.docker com as configurações necessárias." -ForegroundColor Red
+        Write-Error "Nenhum arquivo de configuracao encontrado!"
+        Write-Warning "Crie um arquivo .env.docker com as configuracoes necessarias."
         Read-Host "Pressione Enter para sair..."
         exit 1
     }
 }
 Write-Success "Arquivo .env.docker encontrado"
 
-# Verificar Playwright
-try {
-    if (Test-Path "${env:USERPROFILE}/AppData/Local/ms-playwright") {
-        Write-Success "Browsers Playwright encontrados"
-    } else {
-        Write-Warning "Browsers Playwright não encontrados!"
-        Write-Host "Execute: npx playwright install" -ForegroundColor Yellow
-        Read-Host "Pressione Enter para continuar mesmo assim..."
-    }
-}
-catch {
-    Write-Warning "Não foi possível verificar Playwright"
-}
+# Verificar Playwright - Usando imagem oficial
+Write-Info "Usando imagem oficial Playwright com browsers integrados"
+Write-Success "Browsers ja incluidos na imagem Docker oficial"
 
 # Build da imagem
 Write-Host ""
-Write-Info "📦 Building imagem Docker..."
+Write-Info "Building imagem Docker oficial Playwright..."
 docker build -t cnc-app .
 
 if ($LASTEXITCODE -ne 0) {
@@ -96,23 +88,25 @@ if ($LASTEXITCODE -ne 0) {
 Write-Success "Imagem criada com sucesso"
 
 # Parar container anterior se existir
-Write-Info "🛑 Parando container anterior..."
+Write-Info "Parando container anterior..."
 docker stop cnc-sistema 2>$null
 docker rm cnc-sistema 2>$null
 
-# Criar diretórios se não existirem
+# Criar diretorios se nao existirem
 if (-not (Test-Path "logs")) { New-Item -ItemType Directory -Path "logs" -Force | Out-Null }
 if (-not (Test-Path "temp")) { New-Item -ItemType Directory -Path "temp" -Force | Out-Null }
 
-# Executar novo container
-Write-Info "🚀 Iniciando novo container..."
+# Executar novo container com configuracoes oficiais Playwright
+Write-Info "Iniciando novo container..."
 docker run -d `
   --name cnc-sistema `
   --env-file .env.docker `
   --restart unless-stopped `
+  --init `
+  --ipc=host `
+  --cap-add=SYS_ADMIN `
   -v "${PWD}/logs:/app/logs" `
   -v "${PWD}/temp:/app/temp" `
-  -v "${env:USERPROFILE}/AppData/Local/ms-playwright:/ms-playwright:ro" `
   cnc-app
 
 if ($LASTEXITCODE -ne 0) {
@@ -120,21 +114,22 @@ if ($LASTEXITCODE -ne 0) {
     Read-Host "Pressione Enter para sair..."
     exit 1
 }
-
 Write-Success "Container iniciado com sucesso!"
 
 # Status
 Write-Host ""
-Write-Info "📊 Status do container:"
+Write-Info "Status do container:"
 docker ps -f name=cnc-sistema
 
 Write-Host ""
-Write-Success "✅ Deploy concluído!"
+Write-Success "Deploy concluido!"
+
 Write-Host ""
-Write-Host "📋 Comandos úteis:" -ForegroundColor $ColorInfo
+Write-Host "Comandos uteis:" -ForegroundColor $ColorInfo
 Write-Host "   Ver logs:      docker logs cnc-sistema -f" -ForegroundColor White
 Write-Host "   Parar:         docker stop cnc-sistema" -ForegroundColor White
 Write-Host "   Reiniciar:     docker restart cnc-sistema" -ForegroundColor White
 Write-Host "   Status:        docker ps -f name=cnc-sistema" -ForegroundColor White
+Write-Host "   Teste:         docker exec -it cnc-sistema node build/force.js" -ForegroundColor White
 
-Read-Host "`nPressione Enter para sair..."
+Read-Host "Pressione Enter para sair..."

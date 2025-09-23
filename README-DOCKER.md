@@ -1,6 +1,6 @@
-# 🐳 Sistema CNC - Deploy Docker Simplificado
+# 🐳 Sistema CNC - Deploy Docker com Playwright Oficial
 
-Documentação para execução do sistema CNC via container Docker único.
+Documentação para execução do sistema CNC usando a imagem oficial do Playwright.
 
 ## 📋 Pré-requisitos
 
@@ -10,19 +10,65 @@ Documentação para execução do sistema CNC via container Docker único.
 docker --version
 ```
 
-### 2. **Playwright Global (Host)**
-```powershell
-# Instalar Playwright globalmente
-npm install -g playwright
-
-# Baixar browsers
-npx playwright install
-```
-
-### 3. **Banco MySQL Separado**
+### 2. **Banco MySQL Separado**
 Configure seu próprio banco MySQL (local, Docker separado, ou remoto).
 
-## 📁 Estrutura do Projeto
+**✅ BROWSERS INCLUÍDOS:** Não é necessário instalar Playwright no host!
+
+## 🎯 **Abordagem Oficial Playwright**
+
+### **Imagem Base**
+- 📦 **Imagem**: `mcr.microsoft.com/playwright:v1.54.1-noble`
+- 🔧 **Browsers**: Chromium, Firefox, WebKit pré-instalados
+- 🛡️ **Segurança**: Usuario `pwuser` não-root
+- ⚡ **Performance**: Configurações otimizadas
+
+### **Vantagens da Imagem Oficial**
+- ✅ **Browsers integrados**: Não precisa instalar no host
+- ✅ **Compatibilidade total**: Browsers Linux para container Linux
+- ✅ **Atualizações automáticas**: Microsoft mantém atualizados
+- ✅ **Configurações otimizadas**: `--init`, `--ipc=host`, `--cap-add=SYS_ADMIN`
+- ✅ **Segurança**: Execução com usuário não-root
+
+### **Configuração Obrigatória para Docker**
+⚠️ **IMPORTANTE**: No Docker containers, o Playwright deve usar `headless: true`:
+
+```typescript
+// ✅ CORRETO para Docker
+const browser = await chromium.launch({ 
+    headless: true  // Obrigatório em containers
+});
+
+// ❌ EVITAR em containers
+const browser = await chromium.launch({ 
+    headless: false  // Pode causar problemas
+});
+```
+
+## � **Deploy Rápido**
+
+### **1. Executar Deploy**
+```powershell
+# Script automatizado
+.\scripts\deploy.ps1
+```
+
+### **2. Verificar Status**
+```powershell
+# Ver logs em tempo real
+docker logs cnc-sistema -f
+
+# Status do container
+docker ps -f name=cnc-sistema
+```
+
+### **3. Teste Manual**
+```powershell
+# Executar coleta forçada
+docker exec -it cnc-sistema node build/force.js
+```
+
+## �📁 Estrutura do Projeto
 
 ```
 CNC/

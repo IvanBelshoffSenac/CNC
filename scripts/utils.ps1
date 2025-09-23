@@ -1,4 +1,8 @@
-# =================================================================
+# ==param(
+    [Parameter(Position=0)]
+    [ValidateSet("logs", "stop", "start", "restart", "status", "force", "cleanup", "playwright", "host", "deploy", "help")]
+    [string]$Action = "help"
+)==========================================================
 # UTILITÁRIOS DOCKER - SISTEMA CNC
 # =================================================================
 
@@ -55,9 +59,11 @@ switch ($Action) {
         Write-Info "⚡ Executando CNC força (one-shot)..."
         docker run --rm `
           --env-file .env.docker `
+          --init `
+          --ipc=host `
+          --cap-add=SYS_ADMIN `
           -v "${PWD}/logs:/app/logs" `
           -v "${PWD}/temp:/app/temp" `
-          -v "${env:USERPROFILE}/AppData/Local/ms-playwright:/ms-playwright:ro" `
           cnc-app npm run force
         Write-Success "Execução força concluída"
     }
@@ -67,6 +73,11 @@ switch ($Action) {
         docker container prune -f
         docker image prune -f
         Write-Success "Limpeza concluída"
+    }
+    
+    "deploy" {
+        Write-Info "🚀 Executando deploy completo..."
+        & "${PSScriptRoot}\deploy.ps1"
     }
     
     "help" {
@@ -84,12 +95,14 @@ switch ($Action) {
         Write-Host "  status    - Mostrar status e recursos" -ForegroundColor White
         Write-Host "  force     - Executar coleta forçada (one-shot)" -ForegroundColor White
         Write-Host "  cleanup   - Limpar containers/imagens antigas" -ForegroundColor White
+        Write-Host "  deploy    - Executar deploy completo" -ForegroundColor White
         Write-Host "  help      - Mostrar esta ajuda" -ForegroundColor White
         Write-Host ""
         Write-Host "Exemplos:" -ForegroundColor $ColorInfo
         Write-Host "  .\utils.ps1 logs" -ForegroundColor Gray
         Write-Host "  .\utils.ps1 restart" -ForegroundColor Gray
         Write-Host "  .\utils.ps1 force" -ForegroundColor Gray
+        Write-Host "  .\utils.ps1 deploy" -ForegroundColor Gray
         Write-Host ""
     }
 }

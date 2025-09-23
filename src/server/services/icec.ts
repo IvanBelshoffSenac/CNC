@@ -682,7 +682,7 @@ export class IcecService {
      * @returns Número de sucessos obtidos via web scraping
      */
     private async retryWithWebScrapingMonitoring(errorList: IErrorService[], tasks: ITask[]): Promise<number> {
-        const browser = await chromium.launch({ headless: false });
+        const browser = await chromium.launch({ headless: true });
 
         try {
             const page = await browser.newPage();

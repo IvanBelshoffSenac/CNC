@@ -1,23 +1,29 @@
 # =================================================================
-# DOCKERFILE SISTEMA CNC - VERSÃO SIMPLIFICADA
+# DOCKERFILE SISTEMA CNC - USANDO IMAGEM OFICIAL PLAYWRIGHT
 # =================================================================
-# Container único para execução da aplicação Node.js/TypeScript
+# Usando imagem oficial do Playwright com browsers pré-instalados
 
-FROM node:20-alpine
+FROM mcr.microsoft.com/playwright:v1.54.1-noble
 
 # Metadados básicos
 LABEL description="Sistema CNC - Coleta automatizada de dados econômicos"
-LABEL version="1.0.0"
+LABEL version="2.0.0"
 
-# Instalar apenas utilitários essenciais
-RUN apk add --no-cache dumb-init tzdata ca-certificates
+# Instalar utilitários adicionais
+RUN apt-get update && apt-get install -y \
+    tzdata \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Configurar timezone para Brasil
 ENV TZ=America/Sao_Paulo
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Configurar diretório de trabalho
 WORKDIR /app
+
+# Configurar usuário para segurança (recomendação oficial)
+USER root
 
 # Copiar package.json e instalar dependências
 COPY package*.json ./
@@ -29,15 +35,17 @@ COPY . .
 # Compilar TypeScript
 RUN npm run build
 
-# Configurar Playwright para usar browsers do host
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-
 # Criar diretórios para logs e temp
 RUN mkdir -p logs temp
 
-# Variáveis de ambiente padrão
+# Configurar permissões
+RUN chown -R pwuser:pwuser /app
+
+# Variáveis de ambiente
 ENV NODE_ENV=production
 
-# Comando de execução
-CMD ["dumb-init", "node", "./build/index.js"]
+# Mudar para usuário não-root para execução
+USER pwuser
+
+# Comando de execução com init para evitar processos zumbi
+CMD ["node", "./build/index.js"]
