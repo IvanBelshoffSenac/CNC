@@ -1,0 +1,78 @@
+# =================================================================
+# CONFIGURAÇÃO MYSQL PERSONALIZADA - SISTEMA CNC
+# =================================================================
+# Otimizações para processamento de dados econômicos
+
+[mysqld]
+# =================================================================
+# CONFIGURAÇÕES BÁSICAS
+# =================================================================
+# Charset padrão
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+# Timezone
+default-time-zone = '-03:00'
+
+# =================================================================
+# PERFORMANCE E MEMÓRIA
+# =================================================================
+# Buffer pool (ajustar conforme RAM disponível)
+innodb_buffer_pool_size = 512M
+innodb_buffer_pool_instances = 2
+
+# Log buffer
+innodb_log_buffer_size = 16M
+innodb_log_file_size = 128M
+
+# =================================================================
+# CONEXÕES
+# =================================================================
+max_connections = 200
+max_connect_errors = 1000000
+
+# =================================================================
+# TIMEOUTS
+# =================================================================
+wait_timeout = 600
+interactive_timeout = 600
+net_read_timeout = 300
+net_write_timeout = 300
+
+# =================================================================
+# OTIMIZAÇÕES PARA DADOS CNC
+# =================================================================
+# Suporte para transações longas (web scraping)
+innodb_lock_wait_timeout = 120
+
+# Otimização para inserções em lote
+bulk_insert_buffer_size = 32M
+
+# Query cache (para consultas repetitivas)
+query_cache_type = 1
+query_cache_size = 64M
+query_cache_limit = 8M
+
+# =================================================================
+# LOGS E SEGURANÇA
+# =================================================================
+# Log de erros
+log-error = /var/log/mysql/error.log
+
+# Log geral (desabilitar em produção)
+# general_log = 1
+# general_log_file = /var/log/mysql/general.log
+
+# Log de queries lentas
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 5
+
+# =================================================================
+# CONFIGURAÇÕES DE CLIENTE
+# =================================================================
+[mysql]
+default-character-set = utf8mb4
+
+[client]
+default-character-set = utf8mb4

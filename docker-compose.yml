@@ -1,0 +1,165 @@
+# =================================================================
+# DOCKER COMPOSE - SISTEMA CNC
+# =================================================================
+# Orquestração completa com aplicação CNC e banco MySQL
+# Inclui volumes, networks e configurações de segurança
+
+version: '3.8'
+
+services:
+  # =================================================================
+  # BANCO DE DADOS MYSQL
+  # =================================================================
+  mysql:
+    image: mysql:8.0
+    container_name: cnc-mysql
+    restart: unless-stopped
+    
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: ${DB_NAME:-cnc}
+      MYSQL_USER: ${DB_USER:-fecomercio}
+      MYSQL_PASSWORD: ${PASSWORD:-root}
+      
+    volumes:
+      # Persistência de dados
+      - mysql_data:/var/lib/mysql
+      # Configurações customizadas
+      - ./docker/mysql/conf.d:/etc/mysql/conf.d:ro
+      # Scripts de inicialização
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+      
+    ports:
+      - "${DB_PORT:-3306}:3306"
+      
+    networks:
+      - cnc-network
+      
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 5
+      interval: 30s
+      start_period: 60s
+      
+    security_opt:
+      - no-new-privileges:true
+      
+    # Limites de recursos
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # =================================================================
+  # APLICAÇÃO CNC
+  # =================================================================
+  cnc-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: cnc-application
+    restart: unless-stopped
+    
+    environment:
+      # Database
+      HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-fecomercio}
+      DB_NAME: ${DB_NAME:-cnc}
+      PASSWORD: ${PASSWORD:-root}
+      
+      # Application
+      NODE_ENV: production
+      TZ: America/Sao_Paulo
+      
+      # Carrega variáveis do .env
+      CREDENTIALS_USER: ${CREDENTIALS_USER}
+      CREDENTIALS_PASSWORD: ${CREDENTIALS_PASSWORD}
+      BASE_URL: ${BASE_URL}
+      BASE_URL_SITE_ICEC: ${BASE_URL_SITE_ICEC}
+      BASE_URL_SITE_ICF: ${BASE_URL_SITE_ICF}
+      BASE_URL_SITE_PEIC: ${BASE_URL_SITE_PEIC}
+      
+      # Email/SMTP
+      EXCHANGE_HOST: ${EXCHANGE_HOST}
+      EXCHANGE_PORT: ${EXCHANGE_PORT}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      NOTIFICATION_EMAIL: ${NOTIFICATION_EMAIL}
+      
+      # Schedules
+      SCHEDULE_ICEC: ${SCHEDULE_ICEC:-0 2 1 * *}
+      SCHEDULE_ICF: ${SCHEDULE_ICF:-0 5 1 * *}
+      SCHEDULE_PEIC: ${SCHEDULE_PEIC:-0 8 1 * *}
+      
+      # Periods
+      PERIOD_ICEC: ${PERIOD_ICEC:-01/2010:-1M}
+      PERIOD_ICF: ${PERIOD_ICF:-01/2010:-2M}
+      PERIOD_PEIC: ${PERIOD_PEIC:-01/2010:-1M}
+      
+      # Regions
+      REGIONS_ICEC: ${REGIONS_ICEC:-BR,ES}
+      REGIONS_ICF: ${REGIONS_ICF:-BR,ES}
+      REGIONS_PEIC: ${REGIONS_PEIC:-BR,ES}
+      
+      # Service toggles
+      ENABLED_ICEC: ${ENABLED_ICEC:-true}
+      ENABLED_ICF: ${ENABLED_ICF:-true}
+      ENABLED_PEIC: ${ENABLED_PEIC:-true}
+      
+    volumes:
+      # Logs da aplicação
+      - ./logs:/app/logs
+      # Arquivos temporários
+      - ./temp:/app/temp
+      # Timezone
+      - /etc/localtime:/etc/localtime:ro
+      
+    depends_on:
+      mysql:
+        condition: service_healthy
+        
+    networks:
+      - cnc-network
+      
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('CNC Health: OK')"]
+      timeout: 10s
+      retries: 3
+      interval: 30s
+      start_period: 120s
+      
+    security_opt:
+      - no-new-privileges:true
+      
+    # Limites de recursos
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+# =================================================================
+# VOLUMES
+# =================================================================
+volumes:
+  mysql_data:
+    driver: local
+    name: cnc_mysql_data
+
+# =================================================================
+# NETWORKS
+# =================================================================
+networks:
+  cnc-network:
+    driver: bridge
+    name: cnc_network
