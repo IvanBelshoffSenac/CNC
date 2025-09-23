@@ -209,9 +209,9 @@ RUN npm run build
 #### Estágio de Produção
 ```dockerfile
 FROM node:20-alpine AS production
-RUN apk add --no-cache chromium firefox webkit dumb-init tzdata ca-certificates
+RUN apk add --no-cache chromium dumb-init tzdata ca-certificates
 ENV TZ=America/Sao_Paulo
-ENV PLAYWRIGHT_BROWSERS_PATH=/usr/bin
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
@@ -261,8 +261,13 @@ SET GLOBAL innodb_flush_log_at_trx_commit = 2;
 
 ### Scripts Disponíveis
 
-#### Windows: `scripts\docker-manager.bat`
+#### Windows
+- **PowerShell (Recomendado)**: `scripts\docker-manager.ps1`
+- **Batch (Alternativo)**: `scripts\docker-manager.bat`
+
 #### Linux/Mac: `scripts/docker-manager.sh`
+
+> **Nota**: O script PowerShell oferece melhor suporte a Unicode/emojis no Windows
 
 ### Menu Interativo
 
@@ -536,14 +541,32 @@ ports:
 #### 6. Problemas com Playwright
 
 ```bash
-# Verificar instalação Playwright
-docker-compose exec cnc-app npx playwright --version
+# Se o container não inicializar devido ao Playwright
+# O Dockerfile já está configurado para usar apenas Chromium
 
-# Forçar reinstalação de browsers
-docker-compose exec cnc-app npx playwright install
+# Verificar se o Playwright está funcionando
+docker-compose exec cnc-app npx playwright --version
 
 # Testar web scraping manualmente
 docker-compose exec cnc-app npm run force
+
+# Configurações especiais no Dockerfile:
+# ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+```
+
+#### 7. Problemas de Codificação Windows
+
+```bash
+# Se você ver caracteres estranhos no script Windows:
+# O script foi atualizado para usar codificação UTF-8
+
+# Use o PowerShell como alternativa:
+docker-compose up -d --build
+
+# Ou execute comandos diretos:
+docker-compose build cnc-app
+docker-compose up -d
 ```
 
 ### Comandos de Diagnóstico

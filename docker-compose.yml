@@ -4,8 +4,6 @@
 # Orquestração completa com aplicação CNC e banco MySQL
 # Inclui volumes, networks e configurações de segurança
 
-version: '3.8'
-
 services:
   # =================================================================
   # BANCO DE DADOS MYSQL

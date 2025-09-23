@@ -38,17 +38,28 @@ LABEL maintainer="FeComercio ES <sistema@fecomercio-es.com.br>"
 LABEL description="Sistema automatizado CNC - Coleta de dados econômicos ICEC, ICF e PEIC"
 LABEL version="1.0.0"
 
-# Instalar dependências do sistema para Playwright e MySQL
+# Instalar dependências do sistema necessárias
 RUN apk add --no-cache \
-    # Playwright dependencies
+    # Browsers para Playwright
     chromium \
-    firefox \
-    webkit \
     # System utilities
     dumb-init \
     tzdata \
+    curl \
     # SSL/TLS support
     ca-certificates \
+    # Dependências para Playwright
+    libgcc \
+    libstdc++ \
+    libx11 \
+    libxcomposite \
+    libxdamage \
+    libxext \
+    libxfixes \
+    libxrandr \
+    libxrender \
+    libxss \
+    libxtst \
     && rm -rf /var/cache/apk/*
 
 # Configurar timezone para Brasil
@@ -70,12 +81,13 @@ COPY --from=builder --chown=cnc:nodejs /app/package.json ./
 # Copiar arquivos necessários para runtime
 COPY --chown=cnc:nodejs tsconfig.json ./
 
-# Configurar Playwright para usar Chromium do sistema
-ENV PLAYWRIGHT_BROWSERS_PATH=/usr/bin
+# Configurar Playwright para usar apenas Chromium
+ENV PLAYWRIGHT_BROWSERS_PATH=0
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-# Instalar browsers do Playwright (se necessário)
-RUN npx playwright install-deps 2>/dev/null || true
+# Instalar browsers do Playwright apenas se necessário
+RUN npx --yes playwright@latest install-deps chromium 2>/dev/null || true
 
 # Criar diretórios necessários
 RUN mkdir -p /app/temp /app/logs && \
