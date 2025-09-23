@@ -67,14 +67,9 @@ COPY --from=builder --chown=cnc:nodejs /app/package.json ./
 COPY --chown=cnc:nodejs tsconfig.json ./
 
 # Configurar Playwright para baixar e usar seus próprios browsers
-# Configurar Playwright - será instalado globalmente no container
-ENV PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/playwright
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
-
-# Instalar Playwright globalmente e baixar browsers
-RUN npm install -g playwright@latest && \
-    playwright install chromium --with-deps && \
-    npm cache clean --force
+# Configurar Playwright para usar browsers do host
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # Criar diretórios necessários
 RUN mkdir -p /app/temp /app/logs && \

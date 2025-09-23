@@ -118,6 +118,8 @@ services:
       - ./temp:/app/temp
       # Timezone
       - /etc/localtime:/etc/localtime:ro
+      # Browsers do Playwright (Windows)
+      - ${USERPROFILE}/AppData/Local/ms-playwright:/ms-playwright:ro
       
     depends_on:
       mysql:

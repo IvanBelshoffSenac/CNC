@@ -35,30 +35,55 @@
 - **CPU**: 2 cores mínimo (4 cores recomendado)
 - **Internet**: Conexão estável para web scraping
 
-## 🎭 Playwright - Configuração Automática
+## 🎭 Playwright - Configuração do Host
 
-O sistema CNC utiliza **Playwright** para web scraping. A instalação é totalmente automatizada no Docker:
+O sistema CNC utiliza **Playwright** para web scraping. Para otimizar o Docker, utilizamos os browsers já instalados na máquina host.
 
-### ✅ Instalação Global Automática
+### ✅ Pré-requisito: Playwright no Host
 
-O Dockerfile inclui instalação otimizada do Playwright:
+**OBRIGATÓRIO**: Instale o Playwright na máquina host antes de executar o Docker:
 
-```dockerfile
-# Instalar Playwright globalmente e baixar browsers
-RUN npm install -g playwright@latest && \
-    playwright install chromium --with-deps && \
-    npm cache clean --force
+```bash
+# Instalar Playwright globalmente
+npm install -g playwright
+
+# Baixar browsers (Chromium, Firefox, Safari)
+npx playwright install
 ```
 
-### 🎯 Benefícios da Abordagem
+### 🎯 Estratégia Otimizada
 
-- ✅ **Zero configuração manual** - tudo automático
-- ✅ **Playwright global** - disponível em todo container
-- ✅ **Chromium otimizado** - apenas o necessário
-- ✅ **Cache limpo** - imagem Docker menor
-- ✅ **Dependências incluídas** - `--with-deps` instala tudo
+```dockerfile
+# Docker NÃO instala browsers - usa os do host
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+```
 
-> **💡 Importante**: Não instale Playwright na máquina host - o Docker gerencia tudo automaticamente!
+```yaml
+# docker-compose.yml monta diretório de browsers
+volumes:
+  - ${USERPROFILE}/AppData/Local/ms-playwright:/ms-playwright:ro
+```
+
+### 📁 Localização dos Browsers
+
+#### Windows:
+```
+C:\Users\[usuario]\AppData\Local\ms-playwright\
+├── chromium-*/
+├── firefox-*/
+└── webkit-*/
+```
+
+#### Linux/Mac:
+```
+~/.cache/ms-playwright/
+├── chromium-*/
+├── firefox-*/
+└── webkit-*/
+```
+
+> **💡 Vantagens**: Build Docker ultra-rápido, sem downloads de browsers, reutiliza instalação existente!
 
 ### Verificação de Pré-requisitos
 
@@ -115,7 +140,17 @@ MYSQL_ROOT_PASSWORD=root123_secure
 PASSWORD=fecomercio_secure_2024
 ```
 
-### 4. Execute o Deploy
+### 4. **OBRIGATÓRIO**: Instale Playwright no Host
+
+```bash
+# Instalar Playwright globalmente
+npm install -g playwright
+
+# Baixar todos os browsers
+npx playwright install
+```
+
+### 5. Execute o Deploy
 
 ```bash
 # Windows
@@ -222,27 +257,31 @@ cnc-app:
 
 #### Abordagem Anterior (Problemática)
 ```dockerfile
-# ❌ Instalava dependências do sistema + Chromium
-RUN apk add chromium nss freetype libx11 libxss...
-```
-
-#### Nova Abordagem (Otimizada)
-```dockerfile
-# ✅ Apenas utilitários essenciais do sistema
-RUN apk add --no-cache dumb-init tzdata curl ca-certificates
-
-# ✅ Playwright gerencia tudo sozinho
+# ❌ Tentava instalar no Alpine Linux
 RUN npm install -g playwright@latest && \
     playwright install chromium --with-deps
 ```
 
+#### Nova Abordagem (Otimizada)
+```dockerfile
+# ✅ Usa browsers do host via volume mount
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+```
+
+```yaml
+# ✅ Monta diretório de browsers do host
+volumes:
+  - ${USERPROFILE}/AppData/Local/ms-playwright:/ms-playwright:ro
+```
+
 #### Benefícios da Nova Estratégia
 
-- 🚀 **Build mais rápido** - menos pacotes do sistema
-- 🎯 **Mais confiável** - Playwright gerencia dependências
-- 📦 **Imagem menor** - apenas o necessário
-- 🔧 **Manutenção fácil** - versões controladas pelo npm
-- ✅ **Zero conflitos** - sem dependências duplicadas
+- 🚀 **Build ultra-rápido** - sem download de browsers
+- 🎯 **Mais confiável** - usa instalação existente do host
+- 📦 **Imagem menor** - apenas código da aplicação
+- 🔧 **Manutenção fácil** - atualize Playwright no host
+- ✅ **Zero conflitos** - reutiliza browsers funcionais
 
 ### Dockerfile - Multi-stage Build
 
@@ -518,15 +557,17 @@ docker run --rm -v cnc_mysql_data:/data -v $(pwd):/backup alpine tar xzf /backup
 
 #### 1. Erro no Build do Playwright
 
-**❌ Erro**: `unable to select packages: libxss (no such package)`
+**❌ Erro**: `sh: apt-get: not found` ou `Failed to install browsers`
 
-**✅ Solução**: Atualizado! O Dockerfile agora usa instalação global otimizada:
+**✅ Solução**: Nova abordagem - usa browsers do host!
 
-```dockerfile
-# Nova abordagem - sem dependências do sistema
-RUN npm install -g playwright@latest && \
-    playwright install chromium --with-deps
+```bash
+# Instale Playwright na máquina host ANTES do Docker
+npm install -g playwright
+npx playwright install
 ```
+
+O Docker agora monta os browsers do host via volume mount:
 
 #### 2. Container não inicia
 
