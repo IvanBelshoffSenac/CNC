@@ -519,7 +519,13 @@ export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
         const row = jsonData[i];
 
         // Verifica se é uma linha de cabeçalho (nova categoria)
-        if (row[1] === "TOTAL" && row[2] === "até 10sm - %" && row[3].includes("mais de 10sm")) {
+        // Suporta dois formatos:
+        // Layout atual: row[1] === "TOTAL" && row[2] === "até 10sm - %" && row[3].includes("mais de 10sm")
+        // Layout antigo: row[1] === "total - %" && row[2] === "até 10sm - %" && row[3].includes("mais de 10sm")
+        const isHeaderLayoutAtual = row[1] === "TOTAL" && row[2] === "até 10sm - %" && row[3] && row[3].toString().includes("mais de 10sm");
+        const isHeaderLayoutAntigo = row[1] === "total - %" && row[2] === "até 10sm - %" && row[3] && row[3].toString().includes("mais de 10sm");
+        
+        if (isHeaderLayoutAtual || isHeaderLayoutAntigo) {
             // Se já existe um tipo atual, adiciona ao resultado
             if (currentTipo) {
                 result.push(currentTipo);
