@@ -40,26 +40,11 @@ LABEL version="1.0.0"
 
 # Instalar dependências do sistema necessárias
 RUN apk add --no-cache \
-    # Browsers para Playwright
-    chromium \
-    # System utilities
+    # Utilitários essenciais
     dumb-init \
     tzdata \
     curl \
-    # SSL/TLS support
     ca-certificates \
-    # Dependências para Playwright
-    libgcc \
-    libstdc++ \
-    libx11 \
-    libxcomposite \
-    libxdamage \
-    libxext \
-    libxfixes \
-    libxrandr \
-    libxrender \
-    libxss \
-    libxtst \
     && rm -rf /var/cache/apk/*
 
 # Configurar timezone para Brasil
@@ -81,13 +66,15 @@ COPY --from=builder --chown=cnc:nodejs /app/package.json ./
 # Copiar arquivos necessários para runtime
 COPY --chown=cnc:nodejs tsconfig.json ./
 
-# Configurar Playwright para usar apenas Chromium
-ENV PLAYWRIGHT_BROWSERS_PATH=0
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# Configurar Playwright para baixar e usar seus próprios browsers
+# Configurar Playwright - será instalado globalmente no container
+ENV PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/playwright
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
 
-# Instalar browsers do Playwright apenas se necessário
-RUN npx --yes playwright@latest install-deps chromium 2>/dev/null || true
+# Instalar Playwright globalmente e baixar browsers
+RUN npm install -g playwright@latest && \
+    playwright install chromium --with-deps && \
+    npm cache clean --force
 
 # Criar diretórios necessários
 RUN mkdir -p /app/temp /app/logs && \

@@ -35,6 +35,31 @@
 - **CPU**: 2 cores mínimo (4 cores recomendado)
 - **Internet**: Conexão estável para web scraping
 
+## 🎭 Playwright - Configuração Automática
+
+O sistema CNC utiliza **Playwright** para web scraping. A instalação é totalmente automatizada no Docker:
+
+### ✅ Instalação Global Automática
+
+O Dockerfile inclui instalação otimizada do Playwright:
+
+```dockerfile
+# Instalar Playwright globalmente e baixar browsers
+RUN npm install -g playwright@latest && \
+    playwright install chromium --with-deps && \
+    npm cache clean --force
+```
+
+### 🎯 Benefícios da Abordagem
+
+- ✅ **Zero configuração manual** - tudo automático
+- ✅ **Playwright global** - disponível em todo container
+- ✅ **Chromium otimizado** - apenas o necessário
+- ✅ **Cache limpo** - imagem Docker menor
+- ✅ **Dependências incluídas** - `--with-deps` instala tudo
+
+> **💡 Importante**: Não instale Playwright na máquina host - o Docker gerencia tudo automaticamente!
+
 ### Verificação de Pré-requisitos
 
 Execute os comandos abaixo para verificar se tudo está instalado:
@@ -192,6 +217,32 @@ cnc-app:
     mysql:
       condition: service_healthy  # Aguarda MySQL estar pronto
 ```
+
+### 🎭 Estratégia Playwright Otimizada
+
+#### Abordagem Anterior (Problemática)
+```dockerfile
+# ❌ Instalava dependências do sistema + Chromium
+RUN apk add chromium nss freetype libx11 libxss...
+```
+
+#### Nova Abordagem (Otimizada)
+```dockerfile
+# ✅ Apenas utilitários essenciais do sistema
+RUN apk add --no-cache dumb-init tzdata curl ca-certificates
+
+# ✅ Playwright gerencia tudo sozinho
+RUN npm install -g playwright@latest && \
+    playwright install chromium --with-deps
+```
+
+#### Benefícios da Nova Estratégia
+
+- 🚀 **Build mais rápido** - menos pacotes do sistema
+- 🎯 **Mais confiável** - Playwright gerencia dependências
+- 📦 **Imagem menor** - apenas o necessário
+- 🔧 **Manutenção fácil** - versões controladas pelo npm
+- ✅ **Zero conflitos** - sem dependências duplicadas
 
 ### Dockerfile - Multi-stage Build
 
@@ -465,7 +516,19 @@ docker run --rm -v cnc_mysql_data:/data -v $(pwd):/backup alpine tar xzf /backup
 
 ### Problemas Comuns e Soluções
 
-#### 1. Container não inicia
+#### 1. Erro no Build do Playwright
+
+**❌ Erro**: `unable to select packages: libxss (no such package)`
+
+**✅ Solução**: Atualizado! O Dockerfile agora usa instalação global otimizada:
+
+```dockerfile
+# Nova abordagem - sem dependências do sistema
+RUN npm install -g playwright@latest && \
+    playwright install chromium --with-deps
+```
+
+#### 2. Container não inicia
 
 ```bash
 # Verificar logs de erro
@@ -480,7 +543,7 @@ docker-compose build --no-cache
 docker-compose up -d
 ```
 
-#### 2. Erro de conexão MySQL
+#### 3. Erro de conexão MySQL
 
 ```bash
 # Verificar status do MySQL
