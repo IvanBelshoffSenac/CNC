@@ -431,12 +431,185 @@ export class IcfService {
     // ========================================
 
     /**
+     * Calcula variações mensais ausentes para períodos que não possuem "Índice (Variação Mensal)"
+     * Usa a fórmula: ((ICF_atual / ICF_anterior) - 1) × 100%
+     * Apenas retorna períodos que conseguiram calcular com sucesso
+     * @param icfDataList Lista de dados ICF já processados
+     * @param periodsWithMissingVariation Lista de períodos que falharam por falta de variação mensal
+     * @returns Lista corrigida de dados ICF (apenas com sucessos)
+     */
+    private async calculateMissingVariations(
+        icfDataList: Icf[], 
+        periodsWithMissingVariation: Array<{mes: number, ano: number, regiao: string}>
+    ): Promise<Icf[]> {
+        
+        console.log(`\n🧮 Calculando variações mensais ausentes para ${periodsWithMissingVariation.length} períodos...`);
+        
+        const correctedData: Icf[] = [...icfDataList];
+        const successfulCalculations: Array<{mes: number, ano: number, regiao: string}> = [];
+        
+        for (const period of periodsWithMissingVariation) {
+            try {
+                console.log(`📊 Processando período com variação ausente: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+                
+                // 1. Localizar arquivo Excel do período atual
+                const currentFilePath = await this.findExistingExcelFile(period.regiao, period.mes, period.ano);
+                if (!currentFilePath) {
+                    console.log(`⚠️ Arquivo não encontrado para ${period.regiao} ${period.mes}/${period.ano}, período será ignorado`);
+                    continue;
+                }
+                
+                // 2. Extrair apenas os pontos do período atual (sem variação mensal)
+                const currentPoints = await this.extractPointsOnlyFromExcel(currentFilePath);
+                
+                // 3. Calcular período anterior
+                let prevMes = period.mes - 1;
+                let prevAno = period.ano;
+                if (prevMes === 0) {
+                    prevMes = 12;
+                    prevAno = period.ano - 1;
+                }
+                
+                // 4. Localizar arquivo Excel do período anterior
+                const prevFilePath = await this.findExistingExcelFile(period.regiao, prevMes, prevAno);
+                if (!prevFilePath) {
+                    console.log(`⚠️ Arquivo do período anterior não encontrado (${period.regiao} ${prevMes.toString().padStart(2, '0')}/${prevAno}), período será ignorado`);
+                    continue;
+                }
+                
+                // 5. Extrair pontos do período anterior
+                const prevPoints = await this.extractPointsOnlyFromExcel(prevFilePath);
+                
+                // 6. Calcular variações mensais
+                const variations = this.calculateVariationPercentages(currentPoints, prevPoints);
+                
+                // 7. Criar objeto ICF completo com variações calculadas
+                const icfData: Icf = {
+                    NC_PONTOS: currentPoints.NC_PONTOS,
+                    ATE_10_SM_PONTOS: currentPoints.ATE_10_SM_PONTOS,
+                    MAIS_DE_10_SM_PONTOS: currentPoints.MAIS_DE_10_SM_PONTOS,
+                    NC_PERCENTUAL: variations.NC_PERCENTUAL,
+                    ATE_10_SM_PERCENTUAL: variations.ATE_10_SM_PERCENTUAL,
+                    MAIS_DE_10_SM_PERCENTUAL: variations.MAIS_DE_10_SM_PERCENTUAL,
+                    MES: period.mes,
+                    ANO: period.ano,
+                    REGIAO: period.regiao as Regiao,
+                    METODO: Metodo.PLA
+                };
+                
+                correctedData.push(icfData);
+                successfulCalculations.push(period);
+                console.log(`✅ Variação calculada com sucesso para ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+                
+            } catch (error) {
+                console.log(`❌ Erro ao calcular variação para ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${error}`);
+                console.log(`⚠️ Período ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} será ignorado completamente`);
+            }
+        }
+        
+        const ignoredPeriods = periodsWithMissingVariation.length - successfulCalculations.length;
+        console.log(`✅ Processamento de variações concluído.`);
+        console.log(`   📊 Períodos calculados com sucesso: ${successfulCalculations.length}`);
+        console.log(`   ⚠️ Períodos ignorados (sem período anterior): ${ignoredPeriods}`);
+        console.log(`   📈 Total de registros finais: ${correctedData.length}`);
+        
+        return correctedData;
+    }
+
+    /**
+     * Extrai apenas os pontos ICF de uma planilha (sem variação mensal)
+     * Busca especificamente pela linha 'Índice (Em Pontos)'
+     * @param filePath Caminho completo do arquivo Excel
+     * @returns Objeto com apenas os pontos extraídos
+     */
+    private async extractPointsOnlyFromExcel(filePath: string): Promise<{NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string}> {
+        try {
+            const workbook = XLSX.readFile(filePath);
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
+
+            let pontosRow: any[] | null = null;
+
+            // Buscar linha com pontos
+            for (let i = 0; i < jsonData.length; i++) {
+                const row = jsonData[i];
+                if (row && Array.isArray(row) && row.length >= 4) {
+                    const firstCell = String(row[0] || '').toLowerCase().trim();
+
+                    // Linha com os pontos
+                    if (firstCell.includes('índice (em pontos)') || firstCell.includes('índice(em pontos)')) {
+                        pontosRow = row;
+                        break;
+                    }
+                }
+            }
+
+            if (!pontosRow) {
+                throw new Error('Linha "Índice (Em Pontos)" não encontrada na planilha ICF');
+            }
+
+            // Extrair os pontos (colunas 1, 2, 3) - mantendo como string
+            const pontosData = pontosRow.slice(1, 4).map(val => String(val || ''));
+
+            return {
+                NC_PONTOS: pontosData[0],
+                ATE_10_SM_PONTOS: pontosData[1],
+                MAIS_DE_10_SM_PONTOS: pontosData[2]
+            };
+
+        } catch (error) {
+            throw new Error(`Erro ao extrair pontos da planilha ICF: ${error}`);
+        }
+    }
+
+    /**
+     * Calcula variações percentuais mensais usando a fórmula: ((atual / anterior) - 1) × 100%
+     * @param currentPoints Pontos do período atual
+     * @param prevPoints Pontos do período anterior
+     * @returns Objeto com variações calculadas como string
+     */
+    private calculateVariationPercentages(
+        currentPoints: {NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string},
+        prevPoints: {NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string}
+    ): {NC_PERCENTUAL: string, ATE_10_SM_PERCENTUAL: string, MAIS_DE_10_SM_PERCENTUAL: string} {
+        
+        const calculateVariation = (current: string, previous: string): string => {
+            try {
+                const currentVal = parseFloat(current.replace(',', '.'));
+                const prevVal = parseFloat(previous.replace(',', '.'));
+                
+                if (isNaN(currentVal) || isNaN(prevVal) || prevVal === 0) {
+                    return '0,0';
+                }
+                
+                // Fórmula: ((atual / anterior) - 1) × 100%
+                const variation = ((currentVal / prevVal) - 1) * 100;
+                
+                // Retornar com 1 casa decimal e vírgula como separador
+                return variation.toFixed(1).replace('.', ',');
+                
+            } catch (error) {
+                console.log(`⚠️ Erro ao calcular variação: atual=${current}, anterior=${previous}`);
+                return '0,0';
+            }
+        };
+
+        return {
+            NC_PERCENTUAL: calculateVariation(currentPoints.NC_PONTOS, prevPoints.NC_PONTOS),
+            ATE_10_SM_PERCENTUAL: calculateVariation(currentPoints.ATE_10_SM_PONTOS, prevPoints.ATE_10_SM_PONTOS),
+            MAIS_DE_10_SM_PERCENTUAL: calculateVariation(currentPoints.MAIS_DE_10_SM_PONTOS, prevPoints.MAIS_DE_10_SM_PONTOS)
+        };
+    }
+
+    /**
      * Extrai os dados completos ICF de uma planilha Excel
      * Busca especificamente pelas linhas 'Índice (Em Pontos)' e 'Índice (Variação Mensal)'
+     * Retorna dados parciais quando variação mensal não está disponível
      * @param filePath Caminho completo do arquivo Excel a ser processado
      * @returns Objeto Icf com todos os dados extraídos (valores como string)
      */
-    private async extractCompleteDataFromExcel(filePath: string): Promise<Icf> {
+    private async extractCompleteDataFromExcel(filePath: string): Promise<{data: Icf, hasVariation: boolean}> {
         try {
             const workbook = XLSX.readFile(filePath);
             const sheetName = workbook.SheetNames[0];
@@ -468,17 +641,23 @@ export class IcfService {
                 throw new Error('Linha "Índice (Em Pontos)" não encontrada na planilha ICF');
             }
 
-            if (!percentuaisRow) {
-                throw new Error('Linha "Índice (Variação Mensal)" não encontrada na planilha ICF');
-            }
-
             // Extrair os pontos (colunas 1, 2, 3) - mantendo como string
             const pontosData = pontosRow.slice(1, 4).map(val => String(val || ''));
 
-            // Extrair os percentuais (colunas 1, 2, 3) - mantendo como string
-            const percentuaisData = percentuaisRow.slice(1, 4).map(val => String(val || ''));
+            let percentuaisData: string[];
+            let hasVariation = true;
 
-            return {
+            if (!percentuaisRow) {
+                // Se não encontrou variação mensal, usar valores zerados
+                console.log('⚠️ Linha "Índice (Variação Mensal)" não encontrada - usando valores zerados');
+                percentuaisData = ['0,0', '0,0', '0,0'];
+                hasVariation = false;
+            } else {
+                // Extrair os percentuais (colunas 1, 2, 3) - mantendo como string
+                percentuaisData = percentuaisRow.slice(1, 4).map(val => String(val || ''));
+            }
+
+            const data: Icf = {
                 NC_PONTOS: pontosData[0],
                 ATE_10_SM_PONTOS: pontosData[1],
                 MAIS_DE_10_SM_PONTOS: pontosData[2],
@@ -490,6 +669,8 @@ export class IcfService {
                 REGIAO: 'BR' as any, // Será definido posteriormente
                 METODO: Metodo.PLA
             };
+
+            return { data, hasVariation };
         } catch (error) {
             throw new Error(`Erro ao processar arquivo Excel ICF: ${error}`);
         }
@@ -792,6 +973,9 @@ export class IcfService {
 
         // Array para acumular todos os dados ICF antes de salvar
         const icfDataList: Icf[] = [];
+        
+        // Array para catalogar períodos com erro de "Índice (Variação Mensal)" não encontrada
+        const periodsWithMissingVariation: Array<{mes: number, ano: number, regiao: string}> = [];
 
         for (const period of periods) {
             for (const regiao of regioes) {
@@ -802,16 +986,28 @@ export class IcfService {
                     const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}`);
 
                     // Extrair dados completos diretamente da planilha
-                    const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
+                    const extractResult = await this.extractCompleteDataFromExcel(currentFilePath);
 
                     const icfData: Icf = {
-                        ...completeData,
+                        ...extractResult.data,
                         MES: period.mes,
                         ANO: period.ano,
                         REGIAO: regiao as Regiao
                     };
 
-                    icfDataList.push(icfData);
+                    // Se não tem variação mensal, catalogar para cálculo posterior (não salvar ainda)
+                    if (!extractResult.hasVariation) {
+                        console.log(`📊 Período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} sem variação mensal - será calculada`);
+                        
+                        periodsWithMissingVariation.push({
+                            mes: period.mes,
+                            ano: period.ano,
+                            regiao: regiao
+                        });
+                    } else {
+                        // Apenas adicionar ao icfDataList se tem variação mensal válida
+                        icfDataList.push(icfData);
+                    }
 
                     console.log(LogMessages.sucesso('ICF', regiao, period.mes, period.ano));
 
@@ -821,12 +1017,14 @@ export class IcfService {
                         regiao,
                         status: 'Sucesso',
                         servico: 'ICF',
-                        metodo: Metodo.PLA
+                        metodo: Metodo.PLA,
+                        ...((!extractResult.hasVariation) && { erro: 'Variação mensal ausente - será calculada manualmente' })
                     });
 
                     registrosPlanilha++;
 
                 } catch (error) {
+                    // Erro comum, tratar normalmente
                     console.log(LogMessages.erro('ICF', regiao, period.mes, period.ano, error));
 
                     tasks.push({
@@ -848,10 +1046,51 @@ export class IcfService {
             }
         }
 
+        // Processar períodos com variação mensal ausente
+        let finalIcfDataList = icfDataList;
+        if (periodsWithMissingVariation.length > 0) {
+            console.log(`\n🔧 Processando ${periodsWithMissingVariation.length} períodos com variação mensal ausente...`);
+            
+            finalIcfDataList = await this.calculateMissingVariations(icfDataList, periodsWithMissingVariation);
+            
+            // Atualizar contadores
+            const calculatedPeriods = finalIcfDataList.length - icfDataList.length;
+            registrosPlanilha += calculatedPeriods;
+            
+            // Atualizar tasks com base no resultado do cálculo
+            for (const period of periodsWithMissingVariation) {
+                const isCalculated = finalIcfDataList.some(data => 
+                    data.MES === period.mes && 
+                    data.ANO === period.ano && 
+                    data.REGIAO === period.regiao
+                );
+                
+                const taskIndex = tasks.findIndex(t => 
+                    t.mes === period.mes && 
+                    t.ano === period.ano && 
+                    t.regiao === period.regiao &&
+                    t.erro?.includes('Variação mensal ausente')
+                );
+                
+                if (taskIndex !== -1) {
+                    if (isCalculated) {
+                        // Período calculado com sucesso
+                        delete tasks[taskIndex].erro;
+                        console.log(`✅ Task atualizada: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} calculado com sucesso`);
+                    } else {
+                        // Período ignorado (não conseguiu calcular)
+                        tasks[taskIndex].status = 'Falha';
+                        tasks[taskIndex].erro = 'Período anterior não encontrado - não foi possível calcular variação mensal';
+                        console.log(`❌ Task atualizada: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} ignorado (sem período anterior)`);
+                    }
+                }
+            }
+        }
+
         // Salvar todos os registros ICF de uma vez
-        if (icfDataList.length > 0) {
-            console.log(`\n💾 Salvando ${icfDataList.length} registros ICF no banco de dados...`);
-            savedIds = await this.saveBatchIcfToDatabase(icfDataList);
+        if (finalIcfDataList.length > 0) {
+            console.log(`\n💾 Salvando ${finalIcfDataList.length} registros ICF no banco de dados...`);
+            savedIds = await this.saveBatchIcfToDatabase(finalIcfDataList);
             console.log(`✅ Todos os registros ICF foram salvos com sucesso!`);
         }
 
