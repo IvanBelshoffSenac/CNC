@@ -29,12 +29,29 @@ if ! command -v docker &> /dev/null; then
 fi
 success "Docker encontrado"
 
-# Verificar .env
-if [ ! -f ".env" ]; then
-    error "Arquivo .env não encontrado!"
-    exit 1
+# Verificar .env.docker
+if [ ! -f ".env.docker" ]; then
+    error "Arquivo .env.docker não encontrado!"
+    
+    if [ -f ".env.docker.example" ]; then
+        warning "Copiando .env.docker.example para .env.docker..."
+        cp ".env.docker.example" ".env.docker"
+        warning "IMPORTANTE: Edite o arquivo .env.docker com suas configurações específicas!"
+        info "Configure: HOST, DB_USER, PASSWORD, CREDENTIALS_*, MAIL_* etc."
+        read -p "Pressione Enter para continuar após editar o .env.docker..."
+    elif [ -f ".env" ]; then
+        warning "Copiando .env para .env.docker..."
+        cp ".env" ".env.docker"
+        warning "IMPORTANTE: Edite o .env.docker removendo aspas duplas dos valores!"
+        read -p "Pressione Enter para continuar após editar o .env.docker..."
+    else
+        error "Nenhum arquivo de configuração encontrado!"
+        warning "Crie um arquivo .env.docker com as configurações necessárias."
+        read -p "Pressione Enter para sair..."
+        exit 1
+    fi
 fi
-success "Arquivo .env encontrado"
+success "Arquivo .env.docker encontrado"
 
 # Verificar Playwright
 if [ -d ~/.cache/ms-playwright ]; then
@@ -68,7 +85,7 @@ mkdir -p logs temp
 info "🚀 Iniciando novo container..."
 docker run -d \
   --name cnc-sistema \
-  --env-file .env \
+  --env-file .env.docker \
   --restart unless-stopped \
   -v $(pwd)/logs:/app/logs \
   -v $(pwd)/temp:/app/temp \

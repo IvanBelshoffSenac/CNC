@@ -45,13 +45,29 @@ catch {
     exit 1
 }
 
-# Verificar .env
-if (-not (Test-Path ".env")) {
-    Write-Error "Arquivo .env não encontrado!"
-    Read-Host "Pressione Enter para sair..."
-    exit 1
+# Verificar .env.docker
+if (-not (Test-Path ".env.docker")) {
+    Write-Warning "Arquivo .env.docker não encontrado!"
+    
+    if (Test-Path ".env.docker.example") {
+        Write-Host "Copiando .env.docker.example para .env.docker..." -ForegroundColor Yellow
+        Copy-Item ".env.docker.example" ".env.docker"
+        Write-Warning "IMPORTANTE: Edite o arquivo .env.docker com suas configurações específicas!"
+        Write-Host "Configure: HOST, DB_USER, PASSWORD, CREDENTIALS_*, MAIL_* etc." -ForegroundColor Yellow
+        Read-Host "Pressione Enter para continuar após editar o .env.docker..."
+    } elseif (Test-Path ".env") {
+        Write-Host "Copiando .env para .env.docker..." -ForegroundColor Yellow
+        Copy-Item ".env" ".env.docker"
+        Write-Warning "IMPORTANTE: Edite o .env.docker removendo aspas duplas dos valores!"
+        Read-Host "Pressione Enter para continuar após editar o .env.docker..."
+    } else {
+        Write-Error "Nenhum arquivo de configuração encontrado!"
+        Write-Host "Crie um arquivo .env.docker com as configurações necessárias." -ForegroundColor Red
+        Read-Host "Pressione Enter para sair..."
+        exit 1
+    }
 }
-Write-Success "Arquivo .env encontrado"
+Write-Success "Arquivo .env.docker encontrado"
 
 # Verificar Playwright
 try {
@@ -92,7 +108,7 @@ if (-not (Test-Path "temp")) { New-Item -ItemType Directory -Path "temp" -Force 
 Write-Info "🚀 Iniciando novo container..."
 docker run -d `
   --name cnc-sistema `
-  --env-file .env `
+  --env-file .env.docker `
   --restart unless-stopped `
   -v "${PWD}/logs:/app/logs" `
   -v "${PWD}/temp:/app/temp" `

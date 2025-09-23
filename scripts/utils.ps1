@@ -54,7 +54,7 @@ switch ($Action) {
     "force" {
         Write-Info "⚡ Executando CNC força (one-shot)..."
         docker run --rm `
-          --env-file .env `
+          --env-file .env.docker `
           -v "${PWD}/logs:/app/logs" `
           -v "${PWD}/temp:/app/temp" `
           -v "${env:USERPROFILE}/AppData/Local/ms-playwright:/ms-playwright:ro" `

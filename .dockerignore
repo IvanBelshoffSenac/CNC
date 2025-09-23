@@ -39,6 +39,8 @@ utils.*
 Thumbs.db
 
 # Ambiente sensível
+.env
+.env.docker
 .env.local
 .env.development
 .env.test

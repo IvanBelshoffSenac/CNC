@@ -28,7 +28,8 @@ Configure seu próprio banco MySQL (local, Docker separado, ou remoto).
 CNC/
 ├── 📄 Dockerfile              # Configuração do container
 ├── 📄 .dockerignore          # Arquivos excluídos do build
-├── 📄 .env                   # Variáveis de ambiente
+├── 📄 .env                   # Variáveis para execução LOCAL
+├── 📄 .env.docker            # Variáveis para execução DOCKER
 ├── 📄 README-DOCKER.md       # Esta documentação
 ├── 📁 scripts/               # Scripts de automação
 │   ├── 📄 deploy.ps1         # Deploy automatizado (Windows)
@@ -39,17 +40,39 @@ CNC/
 └── 📁 temp/                  # Arquivos temporários (criado automaticamente)
 ```
 
+## 🔧 Configuração dos Ambientes
+
+### **Para Execução Local (.env)**
+```env
+# Configurações para npm run dev (local)
+NODE_ENV=development
+HOST="10.27.4.136"    # Com aspas (conforme necessário)
+DB_USER="fecomercio"   # Com aspas
+DB_NAME="cnc"          # Com aspas
+PASSWORD="root"        # Com aspas
+```
+
+### **Para Execução Docker (.env.docker)**
+```env
+# Configurações para container Docker
+NODE_ENV=production
+HOST=10.27.4.136      # Sem aspas (Docker)
+DB_USER=fecomercio     # Sem aspas
+DB_NAME=cnc            # Sem aspas
+PASSWORD=root          # Sem aspas
+```
+
 ## ⚡ Deploy Rápido
 
 ### 1. **Configurar Variáveis de Ambiente**
-Edite o arquivo `.env` com suas configurações:
 
+#### **Para execução local - edite `.env`:**
 ```env
-# Banco de dados (seu próprio MySQL)
-HOST="localhost"  # ou IP do seu MySQL
-DB_USER="fecomercio"
-DB_NAME="cnc" 
-PASSWORD="sua_senha"
+# Banco de dados (local)
+HOST="10.27.4.136"      # Com aspas para execução local
+DB_USER="fecomercio"     # Com aspas
+DB_NAME="cnc"            # Com aspas
+PASSWORD="root"          # Com aspas
 
 # Credenciais CNC
 CREDENTIALS_USER="seu_usuario@empresa.com"
@@ -60,6 +83,17 @@ NOTIFICATION_EMAIL="seu_email@empresa.com"
 MAIL_PASSWORD="senha_email"
 ```
 
+#### **Para execução Docker - edite `.env.docker`:**
+```env
+# Banco de dados (Docker)
+HOST=10.27.4.136        # Sem aspas para Docker
+DB_USER=fecomercio       # Sem aspas
+DB_NAME=cnc              # Sem aspas
+PASSWORD=root            # Sem aspas
+
+# ...resto igual ao .env
+```
+
 ### 2. **Build da Imagem**
 ```powershell
 # Build simples
@@ -68,10 +102,10 @@ docker build -t cnc-app .
 
 ### 3. **Executar Container**
 ```powershell
-# Execução básica
+# Execução básica (agora usa .env.docker automaticamente)
 docker run -d \
   --name cnc-sistema \
-  --env-file .env \
+  --env-file .env.docker \
   -v ${PWD}/logs:/app/logs \
   -v ${PWD}/temp:/app/temp \
   -v ${USERPROFILE}/AppData/Local/ms-playwright:/ms-playwright:ro \
