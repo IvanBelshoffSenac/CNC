@@ -1,90 +1,49 @@
 # =================================================================
-# DOCKERIGNORE - SISTEMA CNC
+# DOCKERIGNORE - SISTEMA CNC SIMPLIFICADO
 # =================================================================
-# Otimização do build Docker excluindo arquivos desnecessários
+# Exclusões para build Docker otimizado
 
-# =================================================================
-# DEPENDÊNCIAS E BUILD
-# =================================================================
+# Dependências (serão instaladas no container)
 node_modules/
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
 
-# Build output (será gerado durante o build)
+# Build output (será gerado no container)
 build/
 dist/
 
-# =================================================================
-# DESENVOLVIMENTO
-# =================================================================
+# Desenvolvimento
 .git/
 .gitignore
 *.md
-README.md
-CHANGELOG.md
+README*.md
 
-# IDEs e editores
+# IDEs
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
-# =================================================================
-# LOGS E TEMPORÁRIOS
-# =================================================================
+# Logs e temporários
 logs/
 *.log
 temp/
 tmp/
-.tmp/
 
-# =================================================================
-# DOCKER
-# =================================================================
+# Docker e deploy
 Dockerfile*
-docker-compose*.yml
 .dockerignore
+scripts/
+deploy.*
+utils.*
 
-# =================================================================
-# SISTEMA OPERACIONAL
-# =================================================================
+# Sistema
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
-# =================================================================
-# CONFIGURAÇÕES SENSÍVEIS
-# =================================================================
+# Ambiente sensível
 .env.local
 .env.development
 .env.test
 .env.production
 
-# =================================================================
-# TESTES E COVERAGE
-# =================================================================
-coverage/
-.nyc_output/
-.coverage/
-
-# =================================================================
-# CACHE E TEMPORÁRIOS
-# =================================================================
+# Cache
 .cache/
-.parcel-cache/
-.next/
-.nuxt/
-.vuepress/dist
-
-# =================================================================
-# OUTROS
-# =================================================================
-*.tgz
-*.tar.gz
+coverage/
