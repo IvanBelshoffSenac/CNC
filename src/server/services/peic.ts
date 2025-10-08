@@ -233,17 +233,8 @@ export class PeicService {
             const periodos: IPeriodRegion[] = Array.from(periodosMap.values());
             console.log(`📅 Períodos únicos identificados: ${periodos.length}`);
 
-            // Interface para acumular metadados que serão salvos
-            interface MetadataToSave {
-                metadados: MetadadosPeic[];
-                peicId: string;
-            }
-
             // 3. Para cada período/região, localizar a planilha já baixada e processar metadados
-            const metadataToSaveList: MetadataToSave[] = [];
-
             for (const periodo of periodos) {
-
                 try {
                     console.log(`📥 Processando metadados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}...`);
 
@@ -251,7 +242,7 @@ export class PeicService {
                     const filePath = await this.findExistingExcelFile(periodo.regiao, periodo.mes, periodo.ano);
 
                     if (!filePath) {
-                        console.log(`⚠️ Arquivo não encontrado para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}, pulando metadados...`);
+                        console.log(`⚠️ Arquivo não encontrado para ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano} - pulando processamento de metadados`);
                         continue;
                     }
 
@@ -259,26 +250,24 @@ export class PeicService {
                     const metadados = await this.extractMetadataFromExcel(filePath);
 
                     if (metadados.length > 0) {
-                        // Encontrar registros PEIC que correspondem a este período/região
-                        const registrosDoperiodo = registrosPlanilha.filter(
-                            (r) => r.MES === periodo.mes && r.ANO === periodo.ano && r.REGIAO === periodo.regiao
+                        // Buscar todos os registros PEIC que correspondem a este período/região
+                        const registrosParaPeriodo = registrosPlanilha.filter((r) =>
+                            r.MES === periodo.mes && r.ANO === periodo.ano && r.REGIAO === periodo.regiao
                         );
 
-                        for (const registro of registrosDoperiodo) {
-                            // Verificar se já existem metadados para este registro
-                            const metadadosExistentes = registrosMetadados.filter(
-                                (m) => m.peic && m.peic.id === registro.id
-                            );
+                        // Verificar se já existem metadados para este período
+                        const metadatosExistentes = registrosMetadados.filter((m) =>
+                            m.peic && registrosParaPeriodo.some((r) => r.id === m.peic.id)
+                        );
 
-                            if (metadadosExistentes.length === 0) {
-                                metadataToSaveList.push({
-                                    metadados: [...metadados], // Fazer cópia dos metadados
-                                    peicId: registro.id!
-                                });
-                                console.log(`✅ Metadados preparados para PEIC ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
-                            } else {
-                                console.log(`ℹ️ Metadados já existem para PEIC ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
+                        if (metadatosExistentes.length === 0 && registrosParaPeriodo.length > 0) {
+                            // Salvar metadados individualmente para cada registro PEIC do período
+                            for (const registro of registrosParaPeriodo) {
+                                await this.saveIndividualMetadataToDatabase(metadados, registro);
                             }
+                            console.log(`✅ Metadados processados e salvos para ${registrosParaPeriodo.length} registros PEIC`);
+                        } else {
+                            console.log(`ℹ️ Metadados já existem para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
                         }
                     } else {
                         console.log(`⚠️ Nenhum metadado extraído para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
@@ -287,15 +276,6 @@ export class PeicService {
                 } catch (error) {
                     console.log(`❌ Erro ao processar metadados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}: ${error}`);
                 }
-            }
-
-            // Salvar todos os metadados de uma vez
-            if (metadataToSaveList.length > 0) {
-                console.log(`\n💾 Salvando ${metadataToSaveList.length} lotes de metadados no banco de dados...`);
-                await this.saveBatchMetadataToDatabase(metadataToSaveList, registrosPlanilha);
-                console.log(`✅ Todos os metadados foram salvos com sucesso!`);
-            } else {
-                console.log(`ℹ️ Nenhum metadado novo para salvar`);
             }
 
             console.log('✅ Processamento de metadados PEIC concluído');
@@ -309,6 +289,35 @@ export class PeicService {
     // ========================================
     // SEÇÃO 4: MÉTODOS DE BANCO DE DADOS
     // ========================================
+
+    /**
+     * Salva um único registro PEIC no banco de dados
+     * Utilizado para evitar problemas de performance em produção com grandes volumes
+     * @param peicData Objeto Peic para ser salvo
+     * @returns ID do registro salvo
+     */
+    private async saveIndividualPeicToDatabase(peicData: Peic): Promise<string> {
+        try {
+            const peicEntity = new Peic();
+            peicEntity.ENDIVIDADOS_PERCENTUAL = peicData.ENDIVIDADOS_PERCENTUAL;
+            peicEntity.CONTAS_EM_ATRASO_PERCENTUAL = peicData.CONTAS_EM_ATRASO_PERCENTUAL;
+            peicEntity.NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL = peicData.NÃO_TERAO_CONDICOES_DE_PAGAR_PERCENTUAL;
+            peicEntity.ENDIVIDADOS_ABSOLUTO = peicData.ENDIVIDADOS_ABSOLUTO;
+            peicEntity.CONTAS_EM_ATRASO_ABSOLUTO = peicData.CONTAS_EM_ATRASO_ABSOLUTO;
+            peicEntity.NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO = peicData.NAO_TERÃO_CONDICOES_DE_PAGAR_ABSOLUTO;
+            peicEntity.MES = peicData.MES;
+            peicEntity.ANO = peicData.ANO;
+            peicEntity.REGIAO = peicData.REGIAO;
+            peicEntity.METODO = peicData.METODO;
+
+            const savedEntity = await peicRepository.save(peicEntity);
+            console.log(`💾 Registro PEIC salvo: ${peicData.REGIAO} ${peicData.MES.toString().padStart(2, '0')}/${peicData.ANO}`);
+
+            return savedEntity.id!;
+        } catch (error) {
+            throw new Error(`Erro ao salvar registro PEIC individual no banco: ${error}`);
+        }
+    }
 
     /**
      * Salva múltiplos registros PEIC no banco de dados de forma otimizada
@@ -348,6 +357,37 @@ export class PeicService {
             return savedEntities.map(entity => entity.id!);
         } catch (error) {
             throw new Error(`Erro ao salvar lote de registros PEIC no banco: ${error}`);
+        }
+    }
+
+    /**
+     * Salva metadados individuais no banco de dados
+     * Vincula cada metadado ao seu respectivo registro PEIC
+     * @param metadados Array de metadados para salvar
+     * @param peicEntity Registro PEIC para vinculação
+     */
+    private async saveIndividualMetadataToDatabase(
+        metadados: MetadadosPeic[],
+        peicEntity: Peic
+    ): Promise<void> {
+        try {
+            if (metadados.length === 0) {
+                return;
+            }
+
+            // Vincular cada metadado ao registro PEIC
+            const metadatosToSave: MetadadosPeic[] = [];
+            for (const metadado of metadados) {
+                metadado.peic = peicEntity;
+                metadatosToSave.push(metadado);
+            }
+
+            // Salvar metadados
+            await metadadosPeicRepository.save(metadatosToSave);
+            console.log(`📊 ${metadatosToSave.length} metadados salvos para PEIC ID: ${peicEntity.id}`);
+
+        } catch (error) {
+            throw new Error(`Erro ao salvar metadados individuais no banco: ${error}`);
         }
     }
 
@@ -718,16 +758,13 @@ export class PeicService {
             await this.performLogin(page);
 
             let sucessosWebScraping = 0;
-            const webScrapingDataList: Peic[] = [];
 
             for (const error of errorList) {
                 try {
                     console.log(LogMessages.webScrapingInicio('PEIC', error.regiao, error.mes, error.ano));
 
                     const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
-
-                    // Acumular dados em vez de salvar imediatamente
-                    webScrapingDataList.push(data);
+                    const savedId = await this.saveIndividualPeicToDatabase(data);
 
                     console.log(LogMessages.webScrapingSucesso('PEIC', error.regiao, error.mes, error.ano));
                     sucessosWebScraping++;
@@ -761,13 +798,6 @@ export class PeicService {
                         tasks[taskIndex].erro = `Planilha: ${tasks[taskIndex].erro} | Web Scraping: ${scrapingError}`;
                     }
                 }
-            }
-
-            // Salvar todos os dados de web scraping de uma vez
-            if (webScrapingDataList.length > 0) {
-                console.log(`\n💾 Salvando ${webScrapingDataList.length} registros de web scraping no banco de dados...`);
-                await this.saveBatchPeicToDatabase(webScrapingDataList);
-                console.log(`✅ Todos os registros de web scraping foram salvos com sucesso!`);
             }
 
             console.log(`\n=== Resultado do Web Scraping PEIC ===`);
@@ -808,9 +838,6 @@ export class PeicService {
         let erros: IErrorService[] = [];
         let savedIds: string[] = [];
 
-        // Array para acumular todos os dados PEIC antes de salvar
-        const peicDataList: Peic[] = [];
-
         for (const period of periods) {
             for (const regiao of regioes) {
                 try {
@@ -819,19 +846,15 @@ export class PeicService {
                     const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
                     const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}`);
 
-                    // Extrair dados completos diretamente da planilha (percentuais + absolutos)
                     const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
+                    completeData.MES = period.mes;
+                    completeData.ANO = period.ano;
+                    completeData.REGIAO = regiao as Regiao;
+                    completeData.METODO = Metodo.PLA;
 
-                    const peicData: Peic = {
-                        ...completeData,
-                        MES: period.mes,
-                        ANO: period.ano,
-                        REGIAO: regiao as Regiao
-                    };
-
-                    peicDataList.push(peicData);
-
-                    console.log(LogMessages.sucesso('PEIC', regiao, period.mes, period.ano));
+                    const savedId = await this.saveIndividualPeicToDatabase(completeData);
+                    savedIds.push(savedId);
+                    registrosPlanilha++;
 
                     tasks.push({
                         mes: period.mes,
@@ -842,10 +865,13 @@ export class PeicService {
                         metodo: Metodo.PLA
                     });
 
-                    registrosPlanilha++;
+                    console.log(LogMessages.sucesso('PEIC', regiao, period.mes, period.ano));
 
                 } catch (error) {
+
                     console.log(LogMessages.erro('PEIC', regiao, period.mes, period.ano, error));
+
+                    erros.push({ regiao, mes: period.mes, ano: period.ano });
 
                     tasks.push({
                         mes: period.mes,
@@ -856,21 +882,8 @@ export class PeicService {
                         metodo: Metodo.PLA,
                         erro: error.toString()
                     });
-
-                    erros.push({
-                        regiao,
-                        mes: period.mes,
-                        ano: period.ano
-                    });
                 }
             }
-        }
-
-        // Salvar todos os registros PEIC de uma vez
-        if (peicDataList.length > 0) {
-            console.log(`\n💾 Salvando ${peicDataList.length} registros PEIC no banco de dados...`);
-            savedIds = await this.saveBatchPeicToDatabase(peicDataList);
-            console.log(`✅ Todos os registros PEIC foram salvos com sucesso!`);
         }
 
         // Segunda tentativa com web scraping para os erros
@@ -878,6 +891,12 @@ export class PeicService {
             console.log(`\n🔄 Iniciando segunda tentativa com web scraping para ${erros.length} períodos...`);
             const sucessosWebScraping = await this.retryWithWebScrapingMonitoring(erros, tasks);
             registrosWebScraping = sucessosWebScraping;
+        }
+
+        // Processar metadados para registros do tipo Planilha
+        if (savedIds.length) {
+            console.log('\n🔄 Iniciando processamento de metadados PEIC...');
+            await this.processMetadataForPlanilhaRecords(savedIds);
         }
 
         const endTime = Date.now();
@@ -907,12 +926,6 @@ export class PeicService {
         console.log(`Tempo: ${Math.round(tempoExecucao / 60)} minutos`);
         console.log(`Registros por planilha: ${registrosPlanilha}`);
         console.log(`Registros por web scraping: ${registrosWebScraping}`);
-
-        // Nova etapa: processar metadados para registros do tipo Planilha
-        if (savedIds.length) {
-            console.log('\n🔄 Iniciando processamento de metadados PEIC...');
-            await this.processMetadataForPlanilhaRecords(savedIds);
-        }
 
         // Limpeza da pasta temp ao final da execução
         await cleanupServiceTempFolder('peic', this.TEMP_DIR);

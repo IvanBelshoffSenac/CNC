@@ -53,14 +53,9 @@ if [ ! -f ".env.docker" ]; then
 fi
 success "Arquivo .env.docker encontrado"
 
-# Verificar Playwright
-if [ -d ~/.cache/ms-playwright ]; then
-    success "Browsers Playwright encontrados"
-else
-    warning "Browsers Playwright não encontrados!"
-    echo -e "${YELLOW}Execute: npx playwright install${NC}"
-    read -p "Pressione Enter para continuar mesmo assim..."
-fi
+# Usando imagem oficial Playwright
+info "Usando imagem oficial Playwright com browsers integrados"
+success "Browsers já incluidos na imagem Docker oficial"
 
 # Build da imagem
 echo ""
@@ -78,18 +73,21 @@ info "🛑 Parando container anterior..."
 docker stop cnc-sistema 2>/dev/null
 docker rm cnc-sistema 2>/dev/null
 
-# Criar diretórios se não existirem
+# Criar diretórios se não existirem com permissões corretas
 mkdir -p logs temp
+chmod 777 logs temp
 
-# Executar novo container
+# Executar novo container com configurações oficiais Playwright
 info "🚀 Iniciando novo container..."
 docker run -d \
   --name cnc-sistema \
   --env-file .env.docker \
   --restart unless-stopped \
+  --init \
+  --ipc=host \
+  --cap-add=SYS_ADMIN \
   -v $(pwd)/logs:/app/logs \
   -v $(pwd)/temp:/app/temp \
-  -v ~/.cache/ms-playwright:/ms-playwright:ro \
   cnc-app
 
 if [ $? -ne 0 ]; then
@@ -112,4 +110,5 @@ echo "   Ver logs:      docker logs cnc-sistema -f"
 echo "   Parar:         docker stop cnc-sistema"
 echo "   Reiniciar:     docker restart cnc-sistema"
 echo "   Status:        docker ps -f name=cnc-sistema"
+echo "   Teste:         docker exec -it cnc-sistema node build/force.js"
 echo ""

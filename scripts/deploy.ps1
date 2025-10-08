@@ -95,6 +95,7 @@ docker rm cnc-sistema 2>$null
 # Criar diretorios se nao existirem
 if (-not (Test-Path "logs")) { New-Item -ItemType Directory -Path "logs" -Force | Out-Null }
 if (-not (Test-Path "temp")) { New-Item -ItemType Directory -Path "temp" -Force | Out-Null }
+Write-Info "Permissoes de pasta no Windows sao gerenciadas automaticamente pelo Docker Desktop"
 
 # Executar novo container com configuracoes oficiais Playwright
 Write-Info "Iniciando novo container..."

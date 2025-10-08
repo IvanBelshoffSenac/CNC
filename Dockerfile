@@ -3,7 +3,7 @@
 # =================================================================
 # Usando imagem oficial do Playwright com browsers pré-instalados
 
-FROM mcr.microsoft.com/playwright:v1.54.1-noble
+FROM mcr.microsoft.com/playwright:v1.55.1-noble
 
 # Metadados básicos
 LABEL description="Sistema CNC - Coleta automatizada de dados econômicos"

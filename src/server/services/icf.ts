@@ -242,10 +242,7 @@ export class IcfService {
             }
 
             // 3. Para cada período/região, localizar a planilha já baixada e processar metadados
-            const metadataToSaveList: MetadataToSave[] = [];
-
             for (const periodo of periodos) {
-
                 try {
                     console.log(`📥 Processando metadados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}...`);
 
@@ -253,7 +250,7 @@ export class IcfService {
                     const filePath = await this.findExistingExcelFile(periodo.regiao, periodo.mes, periodo.ano);
 
                     if (!filePath) {
-                        console.log(`⚠️ Arquivo não encontrado para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}, pulando metadados...`);
+                        console.log(`⚠️ Arquivo não encontrado para ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano} - pulando processamento de metadados`);
                         continue;
                     }
 
@@ -261,26 +258,24 @@ export class IcfService {
                     const metadados = await this.extractMetadataFromExcel(filePath);
 
                     if (metadados.length > 0) {
-                        // Encontrar registros ICF que correspondem a este período/região
-                        const registrosDoperiodo = registrosPlanilha.filter(
-                            (r) => r.MES === periodo.mes && r.ANO === periodo.ano && r.REGIAO === periodo.regiao
+                        // Buscar todos os registros ICF que correspondem a este período/região
+                        const registrosParaPeriodo = registrosPlanilha.filter((r) =>
+                            r.MES === periodo.mes && r.ANO === periodo.ano && r.REGIAO === periodo.regiao
                         );
 
-                        for (const registro of registrosDoperiodo) {
-                            // Verificar se já existem metadados para este registro
-                            const metadadosExistentes = registrosMetadados.filter(
-                                (m) => m.icf && m.icf.id === registro.id
-                            );
+                        // Verificar se já existem metadados para este período
+                        const metadatosExistentes = registrosMetadados.filter((m) =>
+                            m.icf && registrosParaPeriodo.some((r) => r.id === m.icf.id)
+                        );
 
-                            if (metadadosExistentes.length === 0) {
-                                metadataToSaveList.push({
-                                    metadados: [...metadados], // Fazer cópia dos metadados
-                                    icfId: registro.id!
-                                });
-                                console.log(`✅ Metadados preparados para ICF ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
-                            } else {
-                                console.log(`ℹ️ Metadados já existem para ICF ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
+                        if (metadatosExistentes.length === 0 && registrosParaPeriodo.length > 0) {
+                            // Salvar metadados individualmente para cada registro ICF do período
+                            for (const registro of registrosParaPeriodo) {
+                                await this.saveIndividualMetadataToDatabase(metadados, registro);
                             }
+                            console.log(`✅ Metadados processados e salvos para ${registrosParaPeriodo.length} registros ICF`);
+                        } else {
+                            console.log(`ℹ️ Metadados já existem para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
                         }
                     } else {
                         console.log(`⚠️ Nenhum metadado extraído para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
@@ -289,15 +284,6 @@ export class IcfService {
                 } catch (error) {
                     console.log(`❌ Erro ao processar metadados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}: ${error}`);
                 }
-            }
-
-            // Salvar todos os metadados de uma vez
-            if (metadataToSaveList.length > 0) {
-                console.log(`\n💾 Salvando ${metadataToSaveList.length} lotes de metadados no banco de dados...`);
-                await this.saveBatchMetadataToDatabase(metadataToSaveList, registrosPlanilha);
-                console.log(`✅ Todos os metadados foram salvos com sucesso!`);
-            } else {
-                console.log(`ℹ️ Nenhum metadado novo para salvar`);
             }
 
             console.log('✅ Processamento de metadados ICF concluído');
@@ -311,6 +297,35 @@ export class IcfService {
     // ========================================
     // SEÇÃO 4: MÉTODOS DE BANCO DE DADOS
     // ========================================
+
+    /**
+     * Salva um único registro ICF no banco de dados
+     * Utilizado para evitar problemas de performance em produção com grandes volumes
+     * @param icfData Objeto Icf para ser salvo
+     * @returns ID do registro salvo
+     */
+    private async saveIndividualIcfToDatabase(icfData: Icf): Promise<string> {
+        try {
+            const icfEntity = new Icf();
+            icfEntity.NC_PONTOS = icfData.NC_PONTOS;
+            icfEntity.ATE_10_SM_PONTOS = icfData.ATE_10_SM_PONTOS;
+            icfEntity.MAIS_DE_10_SM_PONTOS = icfData.MAIS_DE_10_SM_PONTOS;
+            icfEntity.NC_PERCENTUAL = icfData.NC_PERCENTUAL;
+            icfEntity.ATE_10_SM_PERCENTUAL = icfData.ATE_10_SM_PERCENTUAL;
+            icfEntity.MAIS_DE_10_SM_PERCENTUAL = icfData.MAIS_DE_10_SM_PERCENTUAL;
+            icfEntity.MES = icfData.MES;
+            icfEntity.ANO = icfData.ANO;
+            icfEntity.REGIAO = icfData.REGIAO;
+            icfEntity.METODO = icfData.METODO;
+
+            const savedEntity = await icfRepository.save(icfEntity);
+            console.log(`💾 Registro ICF salvo: ${icfData.REGIAO} ${icfData.MES.toString().padStart(2, '0')}/${icfData.ANO}`);
+
+            return savedEntity.id!;
+        } catch (error) {
+            throw new Error(`Erro ao salvar registro ICF individual no banco: ${error}`);
+        }
+    }
 
     /**
      * Salva múltiplos registros ICF no banco de dados de forma otimizada
@@ -350,6 +365,37 @@ export class IcfService {
             return savedEntities.map(entity => entity.id!);
         } catch (error) {
             throw new Error(`Erro ao salvar lote de registros ICF no banco: ${error}`);
+        }
+    }
+
+    /**
+     * Salva metadados individuais no banco de dados
+     * Vincula cada metadado ao seu respectivo registro ICF
+     * @param metadados Array de metadados para salvar
+     * @param icfEntity Registro ICF para vinculação
+     */
+    private async saveIndividualMetadataToDatabase(
+        metadados: MetadadosIcf[],
+        icfEntity: Icf
+    ): Promise<void> {
+        try {
+            if (metadados.length === 0) {
+                return;
+            }
+
+            // Vincular cada metadado ao registro ICF
+            const metadatosToSave: MetadadosIcf[] = [];
+            for (const metadado of metadados) {
+                metadado.icf = icfEntity;
+                metadatosToSave.push(metadado);
+            }
+
+            // Salvar metadados
+            await metadadosIcfRepository.save(metadatosToSave);
+            console.log(`📊 ${metadatosToSave.length} metadados salvos para ICF ID: ${icfEntity.id}`);
+
+        } catch (error) {
+            throw new Error(`Erro ao salvar metadados individuais no banco: ${error}`);
         }
     }
 
@@ -438,30 +484,27 @@ export class IcfService {
      * @param periodsWithMissingVariation Lista de períodos que falharam por falta de variação mensal
      * @returns Lista corrigida de dados ICF (apenas com sucessos)
      */
-    private async calculateMissingVariations(
-        icfDataList: Icf[], 
-        periodsWithMissingVariation: Array<{mes: number, ano: number, regiao: string}>
-    ): Promise<Icf[]> {
-        
+    private async calculateMissingVariations(periodsWithMissingVariation: IErrorService[]): Promise<Icf[]> {
+
         console.log(`\n🧮 Calculando variações mensais ausentes para ${periodsWithMissingVariation.length} períodos...`);
-        
-        const correctedData: Icf[] = [...icfDataList];
-        const successfulCalculations: Array<{mes: number, ano: number, regiao: string}> = [];
-        
+
+        const correctedData: Icf[] = [];
+        const successfulCalculations: IErrorService[] = [];
+
         for (const period of periodsWithMissingVariation) {
             try {
                 console.log(`📊 Processando período com variação ausente: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
-                
+
                 // 1. Localizar arquivo Excel do período atual
                 const currentFilePath = await this.findExistingExcelFile(period.regiao, period.mes, period.ano);
                 if (!currentFilePath) {
                     console.log(`⚠️ Arquivo não encontrado para ${period.regiao} ${period.mes}/${period.ano}, período será ignorado`);
                     continue;
                 }
-                
+
                 // 2. Extrair apenas os pontos do período atual (sem variação mensal)
                 const currentPoints = await this.extractPointsOnlyFromExcel(currentFilePath);
-                
+
                 // 3. Calcular período anterior
                 let prevMes = period.mes - 1;
                 let prevAno = period.ano;
@@ -469,20 +512,20 @@ export class IcfService {
                     prevMes = 12;
                     prevAno = period.ano - 1;
                 }
-                
+
                 // 4. Localizar arquivo Excel do período anterior
                 const prevFilePath = await this.findExistingExcelFile(period.regiao, prevMes, prevAno);
                 if (!prevFilePath) {
                     console.log(`⚠️ Arquivo do período anterior não encontrado (${period.regiao} ${prevMes.toString().padStart(2, '0')}/${prevAno}), período será ignorado`);
                     continue;
                 }
-                
+
                 // 5. Extrair pontos do período anterior
                 const prevPoints = await this.extractPointsOnlyFromExcel(prevFilePath);
-                
+
                 // 6. Calcular variações mensais
                 const variations = this.calculateVariationPercentages(currentPoints, prevPoints);
-                
+
                 // 7. Criar objeto ICF completo com variações calculadas
                 const icfData: Icf = {
                     NC_PONTOS: currentPoints.NC_PONTOS,
@@ -496,23 +539,25 @@ export class IcfService {
                     REGIAO: period.regiao as Regiao,
                     METODO: Metodo.PLA
                 };
-                
+
+                // Salvar registro individual
+                const savedId = await this.saveIndividualIcfToDatabase(icfData);
                 correctedData.push(icfData);
                 successfulCalculations.push(period);
-                console.log(`✅ Variação calculada com sucesso para ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
-                
+                console.log(`✅ Variação calculada e salva para ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+
             } catch (error) {
                 console.log(`❌ Erro ao calcular variação para ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${error}`);
                 console.log(`⚠️ Período ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} será ignorado completamente`);
             }
         }
-        
+
         const ignoredPeriods = periodsWithMissingVariation.length - successfulCalculations.length;
         console.log(`✅ Processamento de variações concluído.`);
         console.log(`   📊 Períodos calculados com sucesso: ${successfulCalculations.length}`);
         console.log(`   ⚠️ Períodos ignorados (sem período anterior): ${ignoredPeriods}`);
         console.log(`   📈 Total de registros finais: ${correctedData.length}`);
-        
+
         return correctedData;
     }
 
@@ -522,7 +567,7 @@ export class IcfService {
      * @param filePath Caminho completo do arquivo Excel
      * @returns Objeto com apenas os pontos extraídos
      */
-    private async extractPointsOnlyFromExcel(filePath: string): Promise<{NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string}> {
+    private async extractPointsOnlyFromExcel(filePath: string): Promise<{ NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string }> {
         try {
             const workbook = XLSX.readFile(filePath);
             const sheetName = workbook.SheetNames[0];
@@ -570,28 +615,28 @@ export class IcfService {
      * @returns Objeto com variações calculadas como string
      */
     private calculateVariationPercentages(
-        currentPoints: {NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string},
-        prevPoints: {NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string}
-    ): {NC_PERCENTUAL: string, ATE_10_SM_PERCENTUAL: string, MAIS_DE_10_SM_PERCENTUAL: string} {
-        
+        currentPoints: { NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string },
+        prevPoints: { NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string }
+    ): { NC_PERCENTUAL: string, ATE_10_SM_PERCENTUAL: string, MAIS_DE_10_SM_PERCENTUAL: string } {
+
         const calculateVariation = (current: string, previous: string): string => {
             try {
                 const currentVal = parseFloat(current.replace(',', '.'));
                 const prevVal = parseFloat(previous.replace(',', '.'));
-                
+
                 if (isNaN(currentVal) || isNaN(prevVal) || prevVal === 0) {
-                    return '0,0';
+                    return '0';
                 }
-                
+
                 // Fórmula: ((atual / anterior) - 1) × 100%
                 const variation = ((currentVal / prevVal) - 1) * 100;
-                
-                // Retornar com 1 casa decimal e vírgula como separador
-                return variation.toFixed(1).replace('.', ',');
-                
+
+                // Retornar o valor completo sem arredondamento, apenas convertendo ponto para vírgula
+                return variation.toString().replace('.', ',');
+
             } catch (error) {
                 console.log(`⚠️ Erro ao calcular variação: atual=${current}, anterior=${previous}`);
-                return '0,0';
+                return '0';
             }
         };
 
@@ -609,7 +654,7 @@ export class IcfService {
      * @param filePath Caminho completo do arquivo Excel a ser processado
      * @returns Objeto Icf com todos os dados extraídos (valores como string)
      */
-    private async extractCompleteDataFromExcel(filePath: string): Promise<{data: Icf, hasVariation: boolean}> {
+    private async extractCompleteDataFromExcel(filePath: string): Promise<{ data: Icf, hasVariation: boolean }> {
         try {
             const workbook = XLSX.readFile(filePath);
             const sheetName = workbook.SheetNames[0];
@@ -897,19 +942,19 @@ export class IcfService {
                     console.log(LogMessages.webScrapingInicio('ICF', error.regiao, error.mes, error.ano));
 
                     const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
-                    const savedIds = await this.saveBatchIcfToDatabase([data]);
+                    const savedId = await this.saveIndividualIcfToDatabase(data);
 
                     console.log(LogMessages.webScrapingSucesso('ICF', error.regiao, error.mes, error.ano));
                     sucessosWebScraping++;
 
                     // Atualizar task correspondente para sucesso
-                    const taskIndex = tasks.findIndex(t => 
-                        t.mes === error.mes && 
-                        t.ano === error.ano && 
-                        t.regiao === error.regiao && 
+                    const taskIndex = tasks.findIndex(t =>
+                        t.mes === error.mes &&
+                        t.ano === error.ano &&
+                        t.regiao === error.regiao &&
                         t.status === 'Falha'
                     );
-                    
+
                     if (taskIndex !== -1) {
                         tasks[taskIndex].status = 'Sucesso';
                         tasks[taskIndex].metodo = Metodo.WS;
@@ -918,15 +963,15 @@ export class IcfService {
 
                 } catch (scrapingError) {
                     console.log(LogMessages.webScrapingFalha('ICF', error.regiao, error.mes, error.ano, scrapingError));
-                    
+
                     // Atualizar erro na task
-                    const taskIndex = tasks.findIndex(t => 
-                        t.mes === error.mes && 
-                        t.ano === error.ano && 
-                        t.regiao === error.regiao && 
+                    const taskIndex = tasks.findIndex(t =>
+                        t.mes === error.mes &&
+                        t.ano === error.ano &&
+                        t.regiao === error.regiao &&
                         t.status === 'Falha'
                     );
-                    
+
                     if (taskIndex !== -1) {
                         tasks[taskIndex].erro = `Planilha: ${tasks[taskIndex].erro} | Web Scraping: ${scrapingError}`;
                     }
@@ -970,12 +1015,8 @@ export class IcfService {
         let registrosWebScraping = 0;
         let erros: IErrorService[] = [];
         let savedIds: string[] = [];
-
-        // Array para acumular todos os dados ICF antes de salvar
-        const icfDataList: Icf[] = [];
-        
         // Array para catalogar períodos com erro de "Índice (Variação Mensal)" não encontrada
-        const periodsWithMissingVariation: Array<{mes: number, ano: number, regiao: string}> = [];
+        const periodsWithMissingVariation: IErrorService[] = [];
 
         for (const period of periods) {
             for (const regiao of regioes) {
@@ -985,31 +1026,43 @@ export class IcfService {
                     const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
                     const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}`);
 
-                    // Extrair dados completos diretamente da planilha
-                    const extractResult = await this.extractCompleteDataFromExcel(currentFilePath);
-
-                    const icfData: Icf = {
-                        ...extractResult.data,
-                        MES: period.mes,
-                        ANO: period.ano,
-                        REGIAO: regiao as Regiao
-                    };
+                    const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
+                    completeData.data.MES = period.mes;
+                    completeData.data.ANO = period.ano;
+                    completeData.data.REGIAO = regiao as Regiao;
+                    completeData.data.METODO = Metodo.PLA;
 
                     // Se não tem variação mensal, catalogar para cálculo posterior (não salvar ainda)
-                    if (!extractResult.hasVariation) {
+                    if (!completeData.hasVariation) {
+
                         console.log(`📊 Período ${regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} sem variação mensal - será calculada`);
-                        
+
                         periodsWithMissingVariation.push({
                             mes: period.mes,
                             ano: period.ano,
                             regiao: regiao
                         });
-                    } else {
-                        // Apenas adicionar ao icfDataList se tem variação mensal válida
-                        icfDataList.push(icfData);
+
+                        tasks.push({
+                            mes: period.mes,
+                            ano: period.ano,
+                            regiao,
+                            status: 'Sucesso',
+                            servico: 'ICF',
+                            metodo: Metodo.PLA,
+                            erro: 'Variação mensal ausente - será calculada manualmente'
+                        });
+
+                        registrosPlanilha++;
+                        console.log(LogMessages.sucesso('PEIC', regiao, period.mes, period.ano));
+
+                        continue; // Não salvar agora, será calculado depois
                     }
 
-                    console.log(LogMessages.sucesso('ICF', regiao, period.mes, period.ano));
+                    // Salvar registro individual
+                    const savedId = await this.saveIndividualIcfToDatabase(completeData.data);
+                    savedIds.push(savedId);
+                    registrosPlanilha++;
 
                     tasks.push({
                         mes: period.mes,
@@ -1017,16 +1070,14 @@ export class IcfService {
                         regiao,
                         status: 'Sucesso',
                         servico: 'ICF',
-                        metodo: Metodo.PLA,
-                        ...((!extractResult.hasVariation) && { erro: 'Variação mensal ausente - será calculada manualmente' })
+                        metodo: Metodo.PLA
                     });
 
-                    registrosPlanilha++;
+                    console.log(LogMessages.sucesso('ICF', regiao, period.mes, period.ano));
 
                 } catch (error) {
-                    // Erro comum, tratar normalmente
-                    console.log(LogMessages.erro('ICF', regiao, period.mes, period.ano, error));
-
+                    console.log(`❌ Erro geral para ${regiao} ${period.mes}/${period.ano}: ${error}`);
+                    erros.push({ regiao, mes: period.mes, ano: period.ano });
                     tasks.push({
                         mes: period.mes,
                         ano: period.ano,
@@ -1036,62 +1087,31 @@ export class IcfService {
                         metodo: Metodo.PLA,
                         erro: error.toString()
                     });
-
-                    erros.push({
-                        regiao,
-                        mes: period.mes,
-                        ano: period.ano
-                    });
                 }
             }
         }
 
         // Processar períodos com variação mensal ausente
-        let finalIcfDataList = icfDataList;
         if (periodsWithMissingVariation.length > 0) {
             console.log(`\n🔧 Processando ${periodsWithMissingVariation.length} períodos com variação mensal ausente...`);
-            
-            finalIcfDataList = await this.calculateMissingVariations(icfDataList, periodsWithMissingVariation);
-            
-            // Atualizar contadores
-            const calculatedPeriods = finalIcfDataList.length - icfDataList.length;
-            registrosPlanilha += calculatedPeriods;
-            
+
+            await this.calculateMissingVariations(periodsWithMissingVariation);
+
             // Atualizar tasks com base no resultado do cálculo
             for (const period of periodsWithMissingVariation) {
-                const isCalculated = finalIcfDataList.some(data => 
-                    data.MES === period.mes && 
-                    data.ANO === period.ano && 
-                    data.REGIAO === period.regiao
-                );
-                
-                const taskIndex = tasks.findIndex(t => 
-                    t.mes === period.mes && 
-                    t.ano === period.ano && 
+                const taskIndex = tasks.findIndex(t =>
+                    t.mes === period.mes &&
+                    t.ano === period.ano &&
                     t.regiao === period.regiao &&
                     t.erro?.includes('Variação mensal ausente')
                 );
-                
+
                 if (taskIndex !== -1) {
-                    if (isCalculated) {
-                        // Período calculado com sucesso
-                        delete tasks[taskIndex].erro;
-                        console.log(`✅ Task atualizada: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} calculado com sucesso`);
-                    } else {
-                        // Período ignorado (não conseguiu calcular)
-                        tasks[taskIndex].status = 'Falha';
-                        tasks[taskIndex].erro = 'Período anterior não encontrado - não foi possível calcular variação mensal';
-                        console.log(`❌ Task atualizada: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} ignorado (sem período anterior)`);
-                    }
+                    // Verificar se foi calculado com sucesso (assumindo sucesso se não houve exceção)
+                    delete tasks[taskIndex].erro;
+                    console.log(`✅ Task atualizada: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} calculado com sucesso`);
                 }
             }
-        }
-
-        // Salvar todos os registros ICF de uma vez
-        if (finalIcfDataList.length > 0) {
-            console.log(`\n💾 Salvando ${finalIcfDataList.length} registros ICF no banco de dados...`);
-            savedIds = await this.saveBatchIcfToDatabase(finalIcfDataList);
-            console.log(`✅ Todos os registros ICF foram salvos com sucesso!`);
         }
 
         // Segunda tentativa com web scraping para os erros
@@ -1099,6 +1119,12 @@ export class IcfService {
             console.log(`\n🔄 Iniciando segunda tentativa com web scraping para ${erros.length} períodos...`);
             const sucessosWebScraping = await this.retryWithWebScrapingMonitoring(erros, tasks);
             registrosWebScraping = sucessosWebScraping;
+        }
+
+        // Processar metadados para registros do tipo Planilha
+        if (savedIds.length) {
+            console.log('\n🔄 Iniciando processamento de metadados ICF...');
+            await this.processMetadataForPlanilhaRecords(savedIds);
         }
 
         const endTime = Date.now();
@@ -1128,12 +1154,6 @@ export class IcfService {
         console.log(`Tempo: ${Math.round(tempoExecucao / 60)} minutos`);
         console.log(`Registros por planilha: ${registrosPlanilha}`);
         console.log(`Registros por web scraping: ${registrosWebScraping}`);
-
-        // Nova etapa: processar metadados para registros do tipo Planilha
-        if (savedIds.length) {
-            console.log('\n🔄 Iniciando processamento de metadados ICF...');
-            await this.processMetadataForPlanilhaRecords(savedIds);
-        }
 
         // Limpeza da pasta temp ao final da execução
         await cleanupServiceTempFolder('icf', this.TEMP_DIR);

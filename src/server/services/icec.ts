@@ -156,7 +156,7 @@ export class IcecService {
             const sheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[sheetName];
             const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
-            
+
             // Usar a função otimizada para extrair dados estruturados
             const icecCompleta = transformJsonToICEC(jsonData);
 
@@ -168,7 +168,7 @@ export class IcecService {
                     const metadado = new MetadadosIcec();
                     metadado.TIPOINDICE = tipo.tipo;
                     metadado.CAMPO = valor.tipo;
-                    
+
                     // Salvar dados brutos como string
                     metadado.TOTAL = this.parseValueToString(valor.total);
                     metadado.EMPRESAS_COM_ATÉ_50_EMPREGADOS = this.parseValueToString(valor["Empresas com até 50 empregados"]);
@@ -207,7 +207,7 @@ export class IcecService {
                 relations: {
                     icec: true
                 }
-            })
+            });
 
             if (registrosPlanilha.length === 0) {
                 console.log('ℹ️ Nenhum registro ICEC do tipo Planilha encontrado');
@@ -237,17 +237,8 @@ export class IcecService {
             const periodos: IPeriodRegion[] = Array.from(periodosMap.values());
             console.log(`📅 Períodos únicos identificados: ${periodos.length}`);
 
-            // Interface para acumular metadados que serão salvos
-            interface MetadataToSave {
-                metadados: MetadadosIcec[];
-                icecId: string;
-            }
-
             // 3. Para cada período/região, localizar a planilha já baixada e processar metadados
-            const metadataToSaveList: MetadataToSave[] = [];
-
             for (const periodo of periodos) {
-
                 try {
                     console.log(`📥 Processando metadados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}...`);
 
@@ -275,11 +266,9 @@ export class IcecService {
                             );
 
                             if (metadadosExistentes.length === 0) {
-                                metadataToSaveList.push({
-                                    metadados: [...metadados], // Fazer cópia dos metadados
-                                    icecId: registro.id!
-                                });
-                                console.log(`✅ Metadados preparados para ICEC ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
+                                // Salvar metadados individualmente
+                                await this.saveIndividualMetadataToDatabase([...metadados], registro);
+                                console.log(`✅ Metadados salvos para ICEC ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
                             } else {
                                 console.log(`ℹ️ Metadados já existem para ICEC ID: ${registro.id} (${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano})`);
                             }
@@ -291,15 +280,6 @@ export class IcecService {
                 } catch (error) {
                     console.log(`❌ Erro ao processar metadados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}: ${error}`);
                 }
-            }
-
-            // Salvar todos os metadados de uma vez
-            if (metadataToSaveList.length > 0) {
-                console.log(`\n💾 Salvando ${metadataToSaveList.length} lotes de metadados no banco de dados...`);
-                await this.saveBatchMetadataToDatabase(metadataToSaveList, registrosPlanilha);
-                console.log(`✅ Todos os metadados foram salvos com sucesso!`);
-            } else {
-                console.log(`ℹ️ Nenhum metadado novo para salvar`);
             }
 
             console.log('✅ Processamento de metadados ICEC concluído');
@@ -315,84 +295,62 @@ export class IcecService {
     // ========================================
 
     /**
-     * Salva múltiplos registros ICEC no banco de dados de forma otimizada
-     * Utiliza operação em lote para melhor performance
-     * @param icecDataList Array de objetos Icec para serem salvos
-     * @returns Array com os IDs dos registros salvos
+     * Salva um único registro ICEC no banco de dados
+     * Utilizado para evitar problemas de performance em produção com grandes volumes
+     * @param icecData Objeto Icec para ser salvo
+     * @returns ID do registro salvo
      */
-    private async saveBatchIcecToDatabase(icecDataList: Icec[]): Promise<string[]> {
+    private async saveIndividualIcecToDatabase(icecData: Icec): Promise<string> {
         try {
-            if (icecDataList.length === 0) {
-                return [];
-            }
+            const icecEntity = new Icec();
+            icecEntity.ICEC = icecData.ICEC;
+            icecEntity.ATÉ_50 = icecData.ATÉ_50;
+            icecEntity.MAIS_DE_50 = icecData.MAIS_DE_50;
+            icecEntity.SEMIDURAVEIS = icecData.SEMIDURAVEIS;
+            icecEntity.NAO_DURAVEIS = icecData.NAO_DURAVEIS;
+            icecEntity.DURAVEIS = icecData.DURAVEIS;
+            icecEntity.MES = icecData.MES;
+            icecEntity.ANO = icecData.ANO;
+            icecEntity.REGIAO = icecData.REGIAO;
+            icecEntity.METODO = icecData.METODO;
 
-            const icecEntities: Icec[] = [];
+            const savedEntity = await icecRepository.save(icecEntity);
+            console.log(`💾 Registro ICEC salvo: ${icecData.REGIAO} ${icecData.MES.toString().padStart(2, '0')}/${icecData.ANO}`);
 
-            for (const data of icecDataList) {
-                const icecEntity = new Icec();
-                icecEntity.ICEC = data.ICEC;
-                icecEntity.ATÉ_50 = data.ATÉ_50;
-                icecEntity.MAIS_DE_50 = data.MAIS_DE_50;
-                icecEntity.SEMIDURAVEIS = data.SEMIDURAVEIS;
-                icecEntity.NAO_DURAVEIS = data.NAO_DURAVEIS;
-                icecEntity.DURAVEIS = data.DURAVEIS;
-                icecEntity.MES = data.MES;
-                icecEntity.ANO = data.ANO;
-                icecEntity.REGIAO = data.REGIAO;
-                icecEntity.METODO = data.METODO;
-
-                icecEntities.push(icecEntity);
-            }
-
-            // Salvar todos de uma vez usando save() com array
-            const savedEntities = await icecRepository.save(icecEntities);
-
-            console.log(`💾 Total de registros ICEC salvos: ${savedEntities.length}`);
-
-            return savedEntities.map(entity => entity.id!);
+            return savedEntity.id!;
         } catch (error) {
-            throw new Error(`Erro ao salvar lote de registros ICEC no banco: ${error}`);
+            throw new Error(`Erro ao salvar registro ICEC individual no banco: ${error}`);
         }
     }
 
     /**
-     * Salva múltiplos lotes de metadados no banco de dados de forma otimizada
+     * Salva metadados individuais no banco de dados
      * Vincula cada metadado ao seu respectivo registro ICEC
-     * @param metadataToSaveList Lista de lotes de metadados para salvar
-     * @param registrosPlanilha Registros ICEC para vinculação
+     * @param metadados Array de metadados para salvar
+     * @param icecEntity Registro ICEC para vinculação
      */
-    private async saveBatchMetadataToDatabase(
-        metadataToSaveList: Array<{ metadados: MetadadosIcec[]; icecId: string }>,
-        registrosPlanilha: Icec[]
+    private async saveIndividualMetadataToDatabase(
+        metadados: MetadadosIcec[],
+        icecEntity: Icec
     ): Promise<void> {
         try {
-            const allMetadataToSave: MetadadosIcec[] = [];
-
-            // Preparar todos os metadados para salvar
-            for (const item of metadataToSaveList) {
-                // Buscar o registro ICEC para vincular
-                const icecEntity = registrosPlanilha.find((i) => i.id === item.icecId);
-
-                if (!icecEntity) {
-                    console.log(`⚠️ Registro ICEC com ID ${item.icecId} não encontrado, pulando...`);
-                    continue;
-                }
-
-                // Vincular cada metadado ao registro ICEC
-                for (const metadado of item.metadados) {
-                    metadado.icec = icecEntity;
-                    allMetadataToSave.push(metadado);
-                }
+            if (metadados.length === 0) {
+                return;
             }
 
-            // Salvar todos os metadados de uma vez usando saveMany (mais eficiente)
-            if (allMetadataToSave.length > 0) {
-                await metadadosIcecRepository.save(allMetadataToSave);
-                console.log(`📊 Total de metadados salvos: ${allMetadataToSave.length}`);
+            // Vincular cada metadado ao registro ICEC
+            const metadatosToSave: MetadadosIcec[] = [];
+            for (const metadado of metadados) {
+                metadado.icec = icecEntity;
+                metadatosToSave.push(metadado);
             }
+
+            // Salvar metadados
+            await metadadosIcecRepository.save(metadatosToSave);
+            console.log(`📊 ${metadatosToSave.length} metadados salvos para ICEC ID: ${icecEntity.id}`);
 
         } catch (error) {
-            throw new Error(`Erro ao salvar lotes de metadados ICEC no banco: ${error}`);
+            throw new Error(`Erro ao salvar metadados individuais no banco: ${error}`);
         }
     }
 
@@ -447,7 +405,7 @@ export class IcecService {
 
             // Buscar linha com 'Índice (em Pontos)' - que é a última linha do ICEC
             let icecRow: any[] | null = null;
-            
+
             for (let i = jsonData.length - 1; i >= 0; i--) {
                 const row = jsonData[i];
                 if (row && row[0]) {
@@ -640,15 +598,7 @@ export class IcecService {
 
                     // Validar se temos pelo menos 7 valores (período + 6 dados ICEC)
                     if (values.length < 7) {
-                        console.log('⚠️ Tentando separação alternativa por espaços múltiplos');
-                        const altValues = rowData.split(/\s{2,}/).filter(val => val.trim() !== '');
-                        console.log('📊 Valores alternativos:', altValues);
-
-                        if (altValues.length >= 7) {
-                            return this.processIcecTableValues(altValues.slice(1)); // Pular a primeira coluna (período)
-                        } else {
-                            throw new Error(`Dados insuficientes na tabela ICEC. Esperado: 7 valores, Encontrado: ${altValues.length}`);
-                        }
+                        throw new Error(`Dados insuficientes na linha. Esperado: 7+ valores, Encontrado: ${values.length}`);
                     }
 
                     return this.processIcecTableValues(values.slice(1)); // Pular a primeira coluna (período)
@@ -661,7 +611,7 @@ export class IcecService {
                 if (rowData && rowData.trim()) {
                     const firstValue = rowData.split(/[\t\s]+/)[0];
                     if (firstValue && firstValue.match(/[A-Z]{3}\s?\d{2}/)) {
-                        console.log(`   - "${firstValue.trim()}"`);
+                        console.log(`  ${index}: ${firstValue}`);
                     }
                 }
             });
@@ -697,19 +647,19 @@ export class IcecService {
                     console.log(LogMessages.webScrapingInicio('ICEC', error.regiao, error.mes, error.ano));
 
                     const data = await this.extractDataFromWebsite(page, error.mes, error.ano, error.regiao);
-                    const savedIds = await this.saveBatchIcecToDatabase([data]);
+                    const savedId = await this.saveIndividualIcecToDatabase(data);
 
                     console.log(LogMessages.webScrapingSucesso('ICEC', error.regiao, error.mes, error.ano));
                     sucessosWebScraping++;
 
                     // Atualizar task correspondente para sucesso
-                    const taskIndex = tasks.findIndex(t => 
-                        t.mes === error.mes && 
-                        t.ano === error.ano && 
-                        t.regiao === error.regiao && 
+                    const taskIndex = tasks.findIndex(t =>
+                        t.mes === error.mes &&
+                        t.ano === error.ano &&
+                        t.regiao === error.regiao &&
                         t.status === 'Falha'
                     );
-                    
+
                     if (taskIndex !== -1) {
                         tasks[taskIndex].status = 'Sucesso';
                         tasks[taskIndex].metodo = Metodo.WS;
@@ -718,15 +668,15 @@ export class IcecService {
 
                 } catch (scrapingError) {
                     console.log(LogMessages.webScrapingFalha('ICEC', error.regiao, error.mes, error.ano, scrapingError));
-                    
+
                     // Atualizar erro na task
-                    const taskIndex = tasks.findIndex(t => 
-                        t.mes === error.mes && 
-                        t.ano === error.ano && 
-                        t.regiao === error.regiao && 
+                    const taskIndex = tasks.findIndex(t =>
+                        t.mes === error.mes &&
+                        t.ano === error.ano &&
+                        t.regiao === error.regiao &&
                         t.status === 'Falha'
                     );
-                    
+
                     if (taskIndex !== -1) {
                         tasks[taskIndex].erro = `Planilha: ${tasks[taskIndex].erro} | Web Scraping: ${scrapingError}`;
                     }
@@ -751,7 +701,7 @@ export class IcecService {
 
     /**
      * Método principal que executa o processamento completo dos dados ICEC
-     * Inclui download, extração, salvamento, retry via web scraping e processamento de metadados
+     * Inclui download, extração, salvamento individual, retry via web scraping e processamento de metadados
      * @param regioes Array de regiões para processamento (padrão: ['BR'])
      * @returns Objeto IServiceResult com estatísticas completas da execução
      */
@@ -771,9 +721,6 @@ export class IcecService {
         let erros: IErrorService[] = [];
         let savedIds: string[] = [];
 
-        // Array para acumular todos os dados ICEC antes de salvar
-        const icecDataList: Icec[] = [];
-
         for (const period of periods) {
             for (const regiao of regioes) {
                 try {
@@ -784,17 +731,15 @@ export class IcecService {
 
                     // Extrair dados completos diretamente da planilha
                     const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
+                    completeData.MES = period.mes;
+                    completeData.ANO = period.ano;
+                    completeData.REGIAO = regiao as Regiao;
+                    completeData.METODO = Metodo.PLA;
 
-                    const icecData: Icec = {
-                        ...completeData,
-                        MES: period.mes,
-                        ANO: period.ano,
-                        REGIAO: regiao as Regiao
-                    };
-
-                    icecDataList.push(icecData);
-
-                    console.log(LogMessages.sucesso('ICEC', regiao, period.mes, period.ano));
+                    // Salvar registro individual no banco de dados
+                    const savedId = await this.saveIndividualIcecToDatabase(completeData);
+                    savedIds.push(savedId);
+                    registrosPlanilha++;
 
                     tasks.push({
                         mes: period.mes,
@@ -805,10 +750,17 @@ export class IcecService {
                         metodo: Metodo.PLA
                     });
 
-                    registrosPlanilha++;
+                    console.log(LogMessages.sucesso('ICEC', regiao, period.mes, period.ano));
 
                 } catch (error) {
+
                     console.log(LogMessages.erro('ICEC', regiao, period.mes, period.ano, error));
+
+                    erros.push({
+                        regiao,
+                        mes: period.mes,
+                        ano: period.ano
+                    });
 
                     tasks.push({
                         mes: period.mes,
@@ -817,23 +769,10 @@ export class IcecService {
                         status: 'Falha',
                         servico: 'ICEC',
                         metodo: Metodo.PLA,
-                        erro: error.toString()
-                    });
-
-                    erros.push({
-                        regiao,
-                        mes: period.mes,
-                        ano: period.ano
+                        erro: String(error)
                     });
                 }
             }
-        }
-
-        // Salvar todos os registros ICEC de uma vez
-        if (icecDataList.length > 0) {
-            console.log(`\n💾 Salvando ${icecDataList.length} registros ICEC no banco de dados...`);
-            savedIds = await this.saveBatchIcecToDatabase(icecDataList);
-            console.log(`✅ Todos os registros ICEC foram salvos com sucesso!`);
         }
 
         // Segunda tentativa com web scraping para os erros
@@ -841,6 +780,12 @@ export class IcecService {
             console.log(`\n🔄 Iniciando segunda tentativa com web scraping para ${erros.length} períodos...`);
             const sucessosWebScraping = await this.retryWithWebScrapingMonitoring(erros, tasks);
             registrosWebScraping = sucessosWebScraping;
+        }
+
+        // Processar metadados para registros do tipo Planilha
+        if (savedIds.length) {
+            console.log('\n🔄 Iniciando processamento de metadados ICEC...');
+            await this.processMetadataForPlanilhaRecords(savedIds);
         }
 
         const endTime = Date.now();
@@ -871,16 +816,9 @@ export class IcecService {
         console.log(`Registros por planilha: ${registrosPlanilha}`);
         console.log(`Registros por web scraping: ${registrosWebScraping}`);
 
-        // Nova etapa: processar metadados para registros do tipo Planilha
-        if (savedIds.length) {
-            console.log('\n🔄 Iniciando processamento de metadados ICEC...');
-            await this.processMetadataForPlanilhaRecords(savedIds);
-        }
-
         // Limpeza da pasta temp ao final da execução
         await cleanupServiceTempFolder('icec', this.TEMP_DIR);
 
         return resultado;
     }
 }
-
