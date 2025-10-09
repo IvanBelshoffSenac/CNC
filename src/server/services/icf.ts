@@ -480,7 +480,6 @@ export class IcfService {
      * Calcula variações mensais ausentes para períodos que não possuem "Índice (Variação Mensal)"
      * Usa a fórmula: ((ICF_atual / ICF_anterior) - 1) × 100%
      * Apenas retorna períodos que conseguiram calcular com sucesso
-     * @param icfDataList Lista de dados ICF já processados
      * @param periodsWithMissingVariation Lista de períodos que falharam por falta de variação mensal
      * @returns Lista corrigida de dados ICF (apenas com sucessos)
      */
@@ -1095,7 +1094,7 @@ export class IcfService {
         if (periodsWithMissingVariation.length > 0) {
             console.log(`\n🔧 Processando ${periodsWithMissingVariation.length} períodos com variação mensal ausente...`);
 
-            await this.calculateMissingVariations(periodsWithMissingVariation);
+            const successfulCalculations = await this.calculateMissingVariations(periodsWithMissingVariation);
 
             // Atualizar tasks com base no resultado do cálculo
             for (const period of periodsWithMissingVariation) {
@@ -1107,9 +1106,23 @@ export class IcfService {
                 );
 
                 if (taskIndex !== -1) {
-                    // Verificar se foi calculado com sucesso (assumindo sucesso se não houve exceção)
-                    delete tasks[taskIndex].erro;
-                    console.log(`✅ Task atualizada: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} calculado com sucesso`);
+                    // Verificar se este período foi calculado com sucesso
+                    const wasCalculated = successfulCalculations.some(calc => 
+                        calc.MES === period.mes && 
+                        calc.ANO === period.ano && 
+                        calc.REGIAO === period.regiao
+                    );
+
+                    if (wasCalculated) {
+                        // Período calculado com sucesso
+                        delete tasks[taskIndex].erro;
+                        console.log(`✅ Task atualizada: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} calculado com sucesso`);
+                    } else {
+                        // Período foi ignorado por falta de período anterior
+                        tasks[taskIndex].status = 'Falha';
+                        tasks[taskIndex].erro = 'Período anterior não encontrado para cálculo de variação mensal';
+                        console.log(`❌ Task marcada como falha: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} - período anterior não encontrado`);
+                    }
                 }
             }
         }

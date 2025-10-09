@@ -145,8 +145,111 @@ export class IcecService {
     // ========================================
 
     /**
-     * Extrai metadados completos de uma planilha ICEC utilizando função otimizada
+     * Versão adaptada do transformJsonToICEC que lida com o layout quebrado
+     * A partir do mês 9/2025, o governo mudou os cabeçalhos de variação mensal
+     * de "Total", "Empresas com até 50 empregados" para "0", "0", "0", etc.
+     */
+    private transformJsonToICEC(jsonData: any[][]): any {
+        const result: any[] = [];
+        let currentTipo: any | null = null;
+        let currentTipoPesquisa: string = '';
+
+        // Função helper para verificar se é a primeira linha inválida (com nulls e "Porte")
+        const isInvalidFirstLine = (row: any[]): boolean => {
+            return row[0] === null && row[1] === null && row[2] === "Porte";
+        };
+
+        // Função para extrair o tipo de pesquisa da coluna 7 do cabeçalho
+        const extractTipoPesquisa = (row: any[]): string => {
+            if (row[7] && typeof row[7] === 'string') {
+                const text = row[7].toString();
+                if (text.includes('ICAEC')) return 'ICAEC';
+                if (text.includes('IEEC')) return 'IEEC';
+                if (text.includes('IIEC')) return 'IIEC';
+                if (text.includes('ICEC')) return 'ICEC';
+            }
+            return currentTipoPesquisa;
+        };
+
+        // Função para identificar cabeçalhos de variação mensal com layout quebrado
+        const isVariacaoMensalQuebraHeader = (row: any[]): boolean => {
+            // Novo formato: linha tem nome da categoria e depois zeros
+            const nomeCategoria = row[0];
+            if (!nomeCategoria || typeof nomeCategoria !== 'string') return false;
+            
+            // Verificar se é uma das categorias de variação mensal conhecidas
+            const isVariacaoMensal = nomeCategoria.includes('(Variação Mensal)');
+            
+            // Verificar se as próximas colunas são zeros
+            const hasZeros = row[1] === 0 && row[2] === 0 && row[3] === 0;
+            
+            return isVariacaoMensal && hasZeros;
+        };
+
+        for (let i = 0; i < jsonData.length; i++) {
+            const row = jsonData[i];
+
+            // Ignorar linha inválida do início
+            if (isInvalidFirstLine(row)) {
+                continue;
+            }
+
+            // Verifica se é uma linha de cabeçalho (nova categoria)
+            // Tipo 1: Categorias normais com "total - em %"
+            // Tipo 2: Categorias de variação mensal com "Total" (formato antigo)
+            // Tipo 3: Categorias de variação mensal com zeros (formato novo/quebrado)
+            const isNormalHeader = row[1] === "total - em %" && row[2] === "Empresas com até 50 empregados" && row[3] === "Empresas com mais de 50 empregados";
+            const isVariacaoMensalHeader = row[1] === "Total" && row[2] === "Empresas com até 50 empregados" && row[3] === "Empresas com mais de 50 empregados";
+            const isVariacaoMensalQuebraHeaderDetected = isVariacaoMensalQuebraHeader(row);
+
+            if (isNormalHeader || isVariacaoMensalHeader || isVariacaoMensalQuebraHeaderDetected) {
+                // Se já existe um tipo atual, adiciona ao resultado
+                if (currentTipo) {
+                    result.push(currentTipo);
+                }
+
+                // Extrai o tipo de pesquisa do cabeçalho
+                currentTipoPesquisa = extractTipoPesquisa(row);
+
+                // Cria novo tipo
+                currentTipo = {
+                    tipo: row[0],
+                    valores: []
+                };
+            } else if (currentTipo && row[0] && row[1] !== undefined) {
+
+                // Verifica se é um índice verdadeiro
+                const isIndice = (row[0] === "Índice" || row[0] === "Índice (em Pontos)");
+
+                // Adiciona o valor (seja índice ou não) com o tipo de pesquisa atual
+                currentTipo.valores.push({
+                    tipo: row[0],
+                    indice: isIndice,
+                    total: row[1] || '',
+                    "Empresas com até 50 empregados": row[2] || '',
+                    "Empresas com mais de 50 empregados": row[3] || '',
+                    semiduraveis: row[4] || '',
+                    nao_duraveis: row[5] || '',
+                    duraveis: row[6] || '',
+                    tipopesquisa: currentTipoPesquisa
+                });
+            }
+        }
+
+        // Adiciona o último tipo se existir
+        if (currentTipo) {
+            result.push(currentTipo);
+        }
+
+        return {
+            icectableTipo: result
+        };
+    }
+
+    /**
+     * Extrai metadados completos de uma planilha ICEC utilizando função otimizada e adaptada
      * Processa todos os tipos de índices e seus respectivos valores
+     * Compatível com ambos os layouts: antigo (até mês 8) e novo (a partir do mês 9)
      * @param filePath Caminho completo da planilha Excel
      * @returns Array de objetos MetadadosIcec com todos os dados estruturados
      */
@@ -157,8 +260,8 @@ export class IcecService {
             const worksheet = workbook.Sheets[sheetName];
             const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
 
-            // Usar a função otimizada para extrair dados estruturados
-            const icecCompleta = transformJsonToICEC(jsonData);
+            // Usar a função adaptada para extrair dados estruturados (compatível com layout quebrado)
+            const icecCompleta = this.transformJsonToICEC(jsonData);
 
             // Converter para o formato MetadadosIcec
             const metadados: MetadadosIcec[] = [];
@@ -183,6 +286,7 @@ export class IcecService {
                 }
             }
 
+            console.log(`📊 Metadados extraídos: ${metadados.length} registros processados`);
             return metadados;
 
         } catch (error) {
