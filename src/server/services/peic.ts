@@ -140,13 +140,187 @@ export class PeicService {
         }
     }
 
+    /**
+     * Valida se o layout da planilha PEIC está conforme o padrão esperado  
+     * Compara com arquivo de referência na pasta baseFiles
+     * @param filePath Caminho da planilha atual a ser validada
+     * @returns Objeto com resultado da validação e detalhes das inconsistências
+     */
+    private async isExcelLayoutValid(filePath: string): Promise<{ valid: boolean, inconsistencies?: string }> {
+        try {
+            console.log('🔍 Validando layout PEIC baseado em padrões estruturais...');
+
+            const metadados = await this.extractMetadataFromExcel(filePath);
+            const inconsistencias: string[] = [];
+            
+            // Detectar tipo de layout para ajustar validação
+            const workbook = XLSX.readFile(filePath);
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
+            const layoutInfo = this.detectLayoutType(jsonData);
+            
+            console.log(`📊 Layout detectado: ${layoutInfo.tipo}`);
+            console.log(`🎯 Metadados esperados: ${layoutInfo.metadadosEsperados}`);
+            
+            // PADRÃO 1: Total de metadados baseado no tipo de layout detectado
+            const metadadosEsperados = layoutInfo.metadadosEsperados;
+            const tolerancia = 5; // Flexibilidade para variações
+            
+            if (metadados.length < (metadadosEsperados - tolerancia) || metadados.length > (metadadosEsperados + tolerancia)) {
+                const erro = `P1: Esperado ~${metadadosEsperados} metadados (±${tolerancia}) para ${layoutInfo.tipo}, encontrado ${metadados.length}`;
+                console.log(`❌ Padrão 1 falhou: ${erro}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 1: Total de metadados adequado (${metadados.length}/${metadadosEsperados})`);
+            }
+
+            // PADRÃO 2: Deve ter os tipos essenciais PEIC (flexível para layouts históricos)
+            const tiposIndice = metadados.map(m => m.TIPOINDICE).filter(t => t);
+            const campos = metadados.map(m => m.CAMPO).filter(c => c);
+            
+            // Verificação de layout invertido (PEIC aparece em CAMPO ao invés de TIPOINDICE)
+            const peicEmCampos = campos.some(c => c.includes('PEIC'));
+            const peicEmTipos = tiposIndice.some(t => t.includes('PEIC'));
+            
+            console.log(`🔍 Debug layout: PEIC em campos=${peicEmCampos}, PEIC em tipos=${peicEmTipos}`);
+            
+            let tiposParaAnalise = tiposIndice;
+            let layoutInvertido = false;
+            
+            // Se PEIC está em campos mas não em tipos, provavelmente é layout invertido
+            if (peicEmCampos && !peicEmTipos) {
+                console.log('⚠️  Layout invertido detectado - usando CAMPOS para análise');
+                tiposParaAnalise = campos;
+                layoutInvertido = true;
+            }
+            
+            // Busca flexível para diferentes formatos históricos
+            const temPEICPercentual = tiposParaAnalise.some(t => 
+                t.includes('PEIC') && t.includes('Percentual')
+            );
+            const temPEICSintese = tiposParaAnalise.some(t => 
+                t.includes('PEIC') && (t.includes('Sintese') || t.includes('Síntese'))
+            );
+            const temTipoDivida = tiposParaAnalise.some(t => 
+                t.includes('Tipo de dívida')
+            );
+            const temNivelEndividamento = tiposParaAnalise.some(t => 
+                t.includes('Nível de endividamento')
+            );
+            
+            const tiposEncontrados = [];
+            if (temPEICPercentual) tiposEncontrados.push('PEIC (Percentual)');
+            if (temPEICSintese) tiposEncontrados.push('PEIC (Sintese)');
+            if (temTipoDivida) tiposEncontrados.push('Tipo de dívida');
+            if (temNivelEndividamento) tiposEncontrados.push('Nível de endividamento');
+            
+            // Para layouts históricos, aceitar pelo menos 2 tipos essenciais
+            if (tiposEncontrados.length < 2) {
+                const erro = `P2: Esperado pelo menos 2 tipos essenciais, encontrado ${tiposEncontrados.length}: [${tiposEncontrados.join(', ')}]`;
+                console.log(`❌ Padrão 2 falhou: ${erro}`);
+                console.log(`🔍 Analisando: [${tiposParaAnalise.slice(0, 10).join(', ')}...]`);
+                console.log(`📊 Layout invertido: ${layoutInvertido ? 'SIM' : 'NÃO'}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 2: Tipos essenciais presentes (${tiposEncontrados.length}/4): [${tiposEncontrados.join(', ')}]`);
+                if (layoutInvertido) console.log(`🔄 Layout invertido corrigido automaticamente`);
+            }
+
+            // PADRÃO 3: Deve ter seções PEIC (flexível para layouts históricos e invertidos)
+            let peicPercentual, peicSintese;
+            
+            if (layoutInvertido) {
+                // Para layout invertido, buscar em CAMPO
+                peicPercentual = metadados.filter(m => 
+                    m.CAMPO && m.CAMPO.includes('PEIC') && m.CAMPO.includes('Percentual')
+                );
+                peicSintese = metadados.filter(m => 
+                    m.CAMPO && m.CAMPO.includes('PEIC') && (
+                        m.CAMPO.includes('Sintese') || m.CAMPO.includes('Síntese')
+                    )
+                );
+            } else {
+                // Para layout normal, buscar em TIPOINDICE
+                peicPercentual = metadados.filter(m => 
+                    m.TIPOINDICE && m.TIPOINDICE.includes('PEIC') && m.TIPOINDICE.includes('Percentual')
+                );
+                peicSintese = metadados.filter(m => 
+                    m.TIPOINDICE && m.TIPOINDICE.includes('PEIC') && (
+                        m.TIPOINDICE.includes('Sintese') || m.TIPOINDICE.includes('Síntese')
+                    )
+                );
+            }
+            
+            // Para layouts históricos, aceitar pelo menos uma das seções PEIC
+            const totalSecoesEssenciais = peicPercentual.length + peicSintese.length;
+            if (totalSecoesEssenciais === 0) {
+                const erro = `P3: Esperado pelo menos uma seção PEIC, encontrado ${totalSecoesEssenciais} (Percentual: ${peicPercentual.length}, Sintese: ${peicSintese.length})`;
+                console.log(`❌ Padrão 3 falhou: ${erro}`);
+                
+                // Debug: mostrar onde "PEIC" foi encontrado
+                const tiposPEIC = tiposParaAnalise.filter(t => t.includes('PEIC'));
+                console.log(`🔍 Elementos com "PEIC" encontrados: [${tiposPEIC.join(', ')}]`);
+                console.log(`📊 Buscando em: ${layoutInvertido ? 'CAMPOS' : 'TIPOS'}`);
+                
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 3: Seções PEIC presentes (Percentual: ${peicPercentual.length}, Sintese: ${peicSintese.length})`);
+            }
+
+            // PADRÃO 4: Deve ter diversidade de campos (pelo menos 30 campos únicos)
+            const camposUnicos = [...new Set(metadados.map(m => m.CAMPO).filter(c => c))];
+            if (camposUnicos.length < 30) {
+                const erro = `P4: Esperado pelo menos 30 campos únicos, encontrado ${camposUnicos.length}`;
+                console.log(`❌ Padrão 4 falhou: ${erro}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 4: Diversidade de campos adequada (${camposUnicos.length} campos únicos)`);
+            }
+
+            // PADRÃO 5: Tipos de índice essenciais devem ter quantidade adequada
+            const tipoQuantidades = {
+                'Tipo de dívida': metadados.filter(m => m.TIPOINDICE?.includes('Tipo de dívida')).length,
+                'Nível de endividamento': metadados.filter(m => m.TIPOINDICE?.includes('Nível de endividamento')).length,
+                'Tempo de comprometimento': metadados.filter(m => m.TIPOINDICE?.includes('Tempo de comprometimento')).length
+            };
+            
+            const problemasTipos = Object.entries(tipoQuantidades)
+                .filter(([tipo, qtd]) => qtd === 0)
+                .map(([tipo, qtd]) => `${tipo}: ${qtd}`);
+            
+            if (problemasTipos.length > 1) {
+                const erro = `P5: Muitos tipos ausentes: [${problemasTipos.join(', ')}]`;
+                console.log(`❌ Padrão 5 falhou: ${erro}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 5: Distribuição de tipos adequada`);
+            }
+
+            // Resultado final
+            const isValid = inconsistencias.length === 0;
+            if (isValid) {
+                console.log('✅ Todos os padrões estruturais PEIC validados com sucesso!');
+            } else {
+                console.log(`❌ Layout PEIC com ${inconsistencias.length} inconsistências encontradas`);
+            }
+            
+            return { valid: isValid, inconsistencies: inconsistencias.join('; ') };
+
+        } catch (error) {
+            console.log(`❌ Erro ao validar layout da planilha PEIC: ${error}`);
+            // Em caso de erro, assumir layout padrão para não interromper processamento
+            return { valid: true, inconsistencies: `Erro na validação: ${error}` };
+        }
+    }
+
     // ========================================
     // SEÇÃO 3: MÉTODOS DE METADADOS
     // ========================================
 
     /**
      * Extrai metadados completos de uma planilha PEIC utilizando função otimizada
-     * Processa todos os tipos de índices e seus respectivos valores
+     * Processa todos os tipos de índices e seus respectivos valores com detecção de layout invertido
      * @param filePath Caminho completo da planilha Excel
      * @returns Array de objetos MetadadosPeic com todos os dados estruturados
      */
@@ -157,17 +331,40 @@ export class PeicService {
             const worksheet = workbook.Sheets[sheetName];
             const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
 
-            // Usar a função otimizada para extrair dados estruturados
+            // 1. DETECTAR TIPO DE LAYOUT COMPLETO
+            console.log('🔍 Detectando tipo de layout para extração de metadados...');
+            const layoutInfo = this.detectLayoutType(jsonData);
+            console.log(`📊 Layout detectado: ${layoutInfo.tipo}`);
+            console.log(`🔧 Configurações: invertido=${layoutInfo.invertido}, histórico=${layoutInfo.historico}, esperados=${layoutInfo.metadadosEsperados}`);
+
+            // 2. EXTRAIR DADOS USANDO FUNÇÃO OTIMIZADA
             const peicCompleta = transformJsonToPEIC(jsonData);
 
-            // Converter para o formato MetadadosPeic
+            // 3. CONVERTER PARA METADADOS COM BASE NO LAYOUT DETECTADO
             const metadados: MetadadosPeic[] = [];
 
             for (const tipo of peicCompleta.peictableTipo) {
                 for (const valor of tipo.valores) {
+                    
+                    // FILTRAR CAMPOS HISTÓRICOS VAZIOS
+                    // Não salvar campos "Índice" que aparecem vazios em layouts históricos
+                    if (this.shouldSkipEmptyHistoricalField(valor)) {
+                        console.log(`🗑️ Pulando campo vazio histórico: "${valor.tipo}"`);
+                        continue;
+                    }
+
                     const metadado = new MetadadosPeic();
-                    metadado.TIPOINDICE = tipo.tipo;
-                    metadado.CAMPO = valor.tipo;
+                    
+                    // Se layout invertido, NÃO inverter - a estrutura já vem invertida dos dados originais
+                    // O problema é que estávamos invertendo algo que já estava correto
+                    if (layoutInfo.invertido) {
+                        console.log(`🔄 Layout invertido detectado mas mantendo estrutura original: TIPOINDICE="${tipo.tipo}" | CAMPO="${valor.tipo}"`);
+                        metadado.TIPOINDICE = tipo.tipo;   // Mantém original (que já está correto)
+                        metadado.CAMPO = valor.tipo;       // Mantém original (que já está correto)
+                    } else {
+                        metadado.TIPOINDICE = tipo.tipo;   // Normal
+                        metadado.CAMPO = valor.tipo;       // Normal
+                    }
 
                     // Salvar dados brutos como string
                     metadado.TOTAL = valor.total || '';
@@ -179,11 +376,173 @@ export class PeicService {
                 }
             }
 
+            const statusLayout = layoutInfo.historico ? 'histórico' : (layoutInfo.invertido ? 'corrigido' : 'padrão');
+            console.log(`✅ Metadados extraídos: ${metadados.length} registros (layout ${statusLayout})`);
+            
+            // Alertar se divergir do esperado
+            if (metadados.length !== layoutInfo.metadadosEsperados) {
+                console.log(`⚠️ Divergência: extraído ${metadados.length}, esperado ${layoutInfo.metadadosEsperados} (diferença: ${metadados.length - layoutInfo.metadadosEsperados})`);
+            }
+            
             return metadados;
 
         } catch (error) {
             throw new Error(`Erro ao extrair metadados da planilha PEIC: ${error}`);
         }
+    }
+
+    /**
+     * Verifica se um campo histórico deve ser pulado por estar vazio
+     * Remove campos como "Índice (Variação Mensal)" e "Índice (Em Pontos)" que aparecem vazios
+     * @param valor Objeto valor com dados do campo
+     * @returns true se deve pular o campo, false se deve manter
+     */
+    private shouldSkipEmptyHistoricalField(valor: any): boolean {
+        const campo = valor.tipo || '';
+        
+        // Identificar campos históricos problemáticos
+        const camposHistoricosVazios = [
+            'Índice (Variação Mensal)',
+            'Índice (Em Pontos)',
+            'Indice (Variação Mensal)',
+            'Indice (Em Pontos)'
+        ];
+        
+        // Verificação mais precisa dos campos históricos problemáticos
+        const isHistoricalField = (
+            campo === 'Índice (Variação Mensal)' ||
+            campo === 'Índice (Em Pontos)' ||
+            campo === 'Indice (Variação Mensal)' ||
+            campo === 'Indice (Em Pontos)'
+        );
+        
+        if (isHistoricalField) {
+            console.log(`🎯 Campo histórico detectado: "${campo}"`);
+            
+            // Verificar se todos os valores estão vazios OU são zeros
+            const total = String(valor.total || '').trim();
+            const ate10sm = String(valor["até 10sm - %"] || '').trim();
+            const mais10sm = String(valor["mais de 10sm - %"] || '').trim();
+            const numeroAbs = String(valor["Numero Absoluto"] || '').trim();
+            
+            // Para campos históricos específicos, considerar também "0" como valor vazio
+            const isEmptyOrZero = (val: string) => !val || val === '' || val === '0';
+            
+            const todosVaziosOuZero = (
+                isEmptyOrZero(total) &&
+                isEmptyOrZero(ate10sm) &&
+                isEmptyOrZero(mais10sm) &&
+                isEmptyOrZero(numeroAbs)
+            );
+            
+            console.log(`  📊 Valores: total="${total}", até10sm="${ate10sm}", mais10sm="${mais10sm}", numeroAbs="${numeroAbs}"`);
+            console.log(`  🎯 Todos vazios ou zero? ${todosVaziosOuZero}`);
+            
+            if (todosVaziosOuZero) {
+                console.log(`  🗑️ PULANDO campo histórico vazio/zero: "${campo}"`);
+                return true; // Pular campo vazio/zero
+            } else {
+                console.log(`  ✅ MANTENDO campo com dados válidos: "${campo}"`);
+                return false; // Manter campo com dados
+            }
+        }
+        
+        // Se não é campo histórico conhecido, verificação original
+        if (camposHistoricosVazios.some(c => campo.includes(c.replace(/[()]/g, '')))) {
+            
+            // Verificar se todos os valores estão vazios
+            const total = String(valor.total || '').trim();
+            const ate10sm = String(valor["até 10sm - %"] || '').trim();
+            const mais10sm = String(valor["mais de 10sm - %"] || '').trim();
+            const numeroAbs = String(valor["Numero Absoluto"] || '').trim();
+            
+            const todosVazios = !total && !ate10sm && !mais10sm && !numeroAbs;
+            
+            if (todosVazios) {
+                return true; // Pular campo vazio
+            }
+        }
+        
+        return false; // Manter campo
+    }
+
+    /**
+     * Detecta o tipo de layout da planilha PEIC baseado em análise estrutural
+     * Identifica layouts históricos, invertidos e modernos
+     * @param jsonData Dados da planilha em formato JSON
+     * @returns Informações detalhadas sobre o tipo de layout detectado
+     */
+    private detectLayoutType(jsonData: any[][]): { 
+        tipo: string, 
+        invertido: boolean, 
+        historico: boolean,
+        metadadosEsperados: number 
+    } {
+        let peicNaPrimeiraColuna = 0;
+        let peicNasOutrasColunas = 0;
+        let indiceVariacaoMensal = 0;
+        let indiceEmPontos = 0;
+
+        // Analisar as primeiras 150 linhas para detectar padrão
+        const maxLinhas = Math.min(jsonData.length, 150);
+        
+        for (let i = 0; i < maxLinhas; i++) {
+            const row = jsonData[i];
+            if (row && Array.isArray(row)) {
+                // Verificar primeira coluna
+                const primeiraColuna = String(row[0] || '').toLowerCase();
+                if (primeiraColuna.includes('peic')) {
+                    peicNaPrimeiraColuna++;
+                }
+                
+                // Verificar outras colunas (1, 2, 3...)
+                for (let j = 1; j < Math.min(row.length, 6); j++) {
+                    const outraColuna = String(row[j] || '').toLowerCase();
+                    if (outraColuna.includes('peic')) {
+                        peicNasOutrasColunas++;
+                    }
+                }
+
+                // Buscar indicadores de layout histórico
+                const rowText = row.join(' ').toLowerCase();
+                if (rowText.includes('índice') && rowText.includes('variação mensal')) {
+                    indiceVariacaoMensal++;
+                }
+                if (rowText.includes('índice') && rowText.includes('em pontos')) {
+                    indiceEmPontos++;
+                }
+            }
+        }
+
+        console.log(`🔍 Análise layout: PEIC na 1ª coluna=${peicNaPrimeiraColuna}, PEIC em outras=${peicNasOutrasColunas}`);
+        console.log(`📊 Indicadores históricos: Variação Mensal=${indiceVariacaoMensal}, Em Pontos=${indiceEmPontos}`);
+
+        // Detectar se é layout invertido
+        const layoutInvertido = peicNasOutrasColunas > peicNaPrimeiraColuna && peicNasOutrasColunas > 0;
+        
+        // Detectar se é layout histórico (tem campos extras de índices)
+        const layoutHistorico = indiceVariacaoMensal > 0 || indiceEmPontos > 0;
+        
+        // Determinar metadados esperados baseado no tipo de layout
+        let metadadosEsperados = 51; // Layout padrão moderno
+        // Após filtragem, layouts históricos também devem ter 51 metadados
+        // O filtro shouldSkipEmptyHistoricalField() remove os 2 campos extras
+
+        let tipoLayout = 'Layout Moderno (2021+)';
+        if (layoutInvertido && layoutHistorico) {
+            tipoLayout = 'Layout Histórico Invertido (2016/04)';
+        } else if (layoutInvertido) {
+            tipoLayout = 'Layout Invertido (2016/04)';
+        } else if (layoutHistorico) {
+            tipoLayout = 'Layout Histórico (2012-2020)';
+        }
+        
+        return {
+            tipo: tipoLayout,
+            invertido: layoutInvertido,
+            historico: layoutHistorico,
+            metadadosEsperados: metadadosEsperados
+        };
     }
 
     /**
@@ -469,8 +828,8 @@ export class PeicService {
     // ========================================
 
     /**
-     * Extrai os dados completos PEIC de uma planilha Excel
-     * Busca especificamente pelas seções PEIC (Percentual) e PEIC (Síntese)
+     * Extrai os dados completos PEIC de uma planilha Excel com detecção de layout invertido
+     * Busca especificamente pelas seções PEIC (Percentual) e PEIC (Síntese) em layouts históricos
      * @param filePath Caminho completo do arquivo Excel a ser processado
      * @returns Objeto Peic com todos os dados extraídos (valores como string)
      */
@@ -481,17 +840,41 @@ export class PeicService {
             const worksheet = workbook.Sheets[sheetName];
             const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
 
+            console.log('🔍 Iniciando extração de dados completos PEIC...');
+
             let percentualRow: any[] | null = null;
             let absolutoRow: any[] | null = null;
 
-            // Buscar as linhas necessárias
+            // BUSCA FLEXÍVEL: Verificar tanto layouts padrão quanto invertidos
+            const layoutInfo = this.detectLayoutType(jsonData);
+            console.log(`📊 Extraindo dados com layout: ${layoutInfo.tipo}`);
+
+            // Buscar as linhas necessárias com múltiplas estratégias
             for (let i = 0; i < jsonData.length; i++) {
                 const row = jsonData[i];
                 if (row && Array.isArray(row) && row.length >= 2) {
+                    
+                    // ESTRATÉGIA 1: Busca na primeira coluna (layout padrão)
                     const firstCell = String(row[0] || '').toLowerCase().trim();
+                    
+                    // ESTRATÉGIA 2: Busca em outras colunas (layout invertido)
+                    const otherCells = [
+                        String(row[1] || '').toLowerCase().trim(),
+                        String(row[2] || '').toLowerCase().trim(),
+                        String(row[3] || '').toLowerCase().trim()
+                    ];
+
+                    // Verificar se alguma célula contém PEIC (Percentual)
+                    const contemPeicPercentual = firstCell.includes('peic') && firstCell.includes('percentual') ||
+                                                 otherCells.some(cell => cell.includes('peic') && cell.includes('percentual'));
+
+                    // Verificar se alguma célula contém PEIC (Síntese)  
+                    const contemPeicSintese = firstCell.includes('peic') && firstCell.includes('sintese') ||
+                                             otherCells.some(cell => cell.includes('peic') && cell.includes('sintese'));
 
                     // Linha com percentuais - PEIC (Percentual)
-                    if (firstCell.includes('peic') && firstCell.includes('percentual')) {
+                    if (contemPeicPercentual) {
+                        console.log(`✅ Seção PEIC (Percentual) encontrada na linha ${i + 1}`);
                         // As próximas 3 linhas contêm os dados percentuais
                         if (i + 3 < jsonData.length) {
                             percentualRow = [];
@@ -502,11 +885,13 @@ export class PeicService {
                                     percentualRow.push(dataRow[1]);
                                 }
                             }
+                            console.log(`📊 Dados percentuais extraídos: [${percentualRow.join(', ')}]`);
                         }
                     }
 
                     // Linha com valores absolutos - PEIC (Síntese)
-                    if (firstCell.includes('peic') && firstCell.includes('sintese')) {
+                    if (contemPeicSintese) {
+                        console.log(`✅ Seção PEIC (Síntese) encontrada na linha ${i + 1}`);
                         // As próximas 3 linhas contêm os dados absolutos
                         if (i + 3 < jsonData.length) {
                             absolutoRow = [];
@@ -517,17 +902,47 @@ export class PeicService {
                                     absolutoRow.push(dataRow[1]);
                                 }
                             }
+                            console.log(`📊 Dados absolutos extraídos: [${absolutoRow.join(', ')}]`);
                         }
                     }
                 }
             }
 
+            // VALIDAÇÃO COM MENSAGENS DETALHADAS
             if (!percentualRow || percentualRow.length < 3) {
-                throw new Error('Dados percentuais PEIC não encontrados na planilha');
+                console.log('❌ Falha na extração: Dados percentuais PEIC não encontrados');
+                console.log('🔍 Tentando busca alternativa por "PEIC" + "Percentual"...');
+                
+                // Busca alternativa mais ampla
+                for (let i = 0; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (row) {
+                        const rowText = row.join(' ').toLowerCase();
+                        if (rowText.includes('peic') && rowText.includes('percentual')) {
+                            console.log(`🔍 Encontrada linha alternativa ${i + 1}: ${rowText}`);
+                        }
+                    }
+                }
+                
+                throw new Error('Dados percentuais PEIC não encontrados na planilha (tentativas: padrão + invertido + alternativa)');
             }
 
             if (!absolutoRow || absolutoRow.length < 3) {
-                throw new Error('Dados absolutos PEIC não encontrados na planilha');
+                console.log('❌ Falha na extração: Dados absolutos PEIC não encontrados');
+                console.log('🔍 Tentando busca alternativa por "PEIC" + "Sintese"...');
+                
+                // Busca alternativa mais ampla
+                for (let i = 0; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (row) {
+                        const rowText = row.join(' ').toLowerCase();
+                        if (rowText.includes('peic') && (rowText.includes('sintese') || rowText.includes('síntese'))) {
+                            console.log(`🔍 Encontrada linha alternativa ${i + 1}: ${rowText}`);
+                        }
+                    }
+                }
+                
+                throw new Error('Dados absolutos PEIC não encontrados na planilha (tentativas: padrão + invertido + alternativa)');
             }
 
             // Processar os dados extraídos
@@ -846,6 +1261,11 @@ export class PeicService {
                     const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
                     const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}`);
 
+                    // Validar layout da planilha
+                    const layoutValidation = await this.isExcelLayoutValid(currentFilePath);
+                    const layoutStatus = layoutValidation.valid ? 'padrão' : 'inconsistente';
+                    const inconsistenciaLayout = layoutValidation.inconsistencies;
+
                     const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
                     completeData.MES = period.mes;
                     completeData.ANO = period.ano;
@@ -862,7 +1282,9 @@ export class PeicService {
                         regiao,
                         status: 'Sucesso',
                         servico: 'PEIC',
-                        metodo: Metodo.PLA
+                        metodo: Metodo.PLA,
+                        layout: layoutStatus,
+                        inconsistenciaLayout: inconsistenciaLayout
                     });
 
                     console.log(LogMessages.sucesso('PEIC', regiao, period.mes, period.ano));
@@ -932,4 +1354,6 @@ export class PeicService {
 
         return resultado;
     }
+
+
 }

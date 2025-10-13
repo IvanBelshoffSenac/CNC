@@ -52,6 +52,8 @@ export interface ITask {
     status: 'Sucesso' | 'Falha';
     servico: 'ICF' | 'ICEC' | 'PEIC';
     metodo: Metodo;
+    layout?: 'padrão' | 'inconsistente';
+    inconsistenciaLayout?: string;
     erro?: string;
 }
 

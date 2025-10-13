@@ -140,14 +140,224 @@ export class IcecService {
         }
     }
 
-    // ========================================
+    /**
+     * Valida se o layout da planilha ICEC está conforme padrões estruturais conhecidos
+     * Usa análise de metadados extraídos para identificar inconsistências de layout
+     * @param filePath Caminho da planilha atual a ser validada
+     * @returns Objeto com resultado da validação e detalhes das inconsistências
+     */
+    private async isExcelLayoutValid(filePath: string): Promise<{valid: boolean, inconsistencies?: string}> {
+        try {
+            console.log('🔍 Validando layout ICEC baseado em padrões estruturais...');
+
+            const metadados = await this.extractMetadataFromExcel(filePath);
+            const inconsistencias: string[] = [];
+            
+            // PADRÃO 1: Total de metadados deve ser 62
+            if (metadados.length !== 62) {
+                const erro = `P1: Esperado 62 metadados, encontrado ${metadados.length}`;
+                console.log(`❌ Padrão 1 falhou: ${erro}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log('✅ Padrão 1: Total de metadados correto (62)');
+            }
+
+            // PADRÃO 2: Deve ter pelo menos 3 tipos de pesquisa únicos (flexível para layouts antigos)
+            const tiposPesquisa = new Set(metadados.map(m => m.TIPOPESQUISA).filter(t => t));
+            const tiposDetectados = Array.from(tiposPesquisa);
+            const tiposEsperados = ['ICAEC', 'IEEC', 'IIEC', 'ICEC'];
+            
+            // Para layouts antigos, aceitar pelo menos 3 tipos ou ter pelo menos os básicos
+            const temTiposBasicos = tiposDetectados.some(t => ['ICAEC', 'IEEC', 'IIEC'].includes(t));
+            
+            if (tiposPesquisa.size < 3 && !temTiposBasicos) {
+                const erro = `P2: Esperado pelo menos 3 tipos de pesquisa ou tipos básicos, encontrado [${tiposDetectados.join(', ')}]`;
+                console.log(`❌ Padrão 2 falhou: ${erro}`);
+                console.log(`🔍 Tipos esperados: [${tiposEsperados.join(', ')}]`);
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 2: Tipos de pesquisa adequados (${tiposPesquisa.size} tipos: ${tiposDetectados.join(', ')})`);
+            }
+
+            // PADRÃO 3: Deve ter exatamente 4 índices "em Pontos" (um para cada tipo)
+            const indicesEmPontos = metadados.filter(m => 
+                m.CAMPO && (
+                    m.CAMPO.includes('(em Pontos)') || 
+                    m.CAMPO.includes('(Em Pontos)') ||
+                    m.CAMPO === 'Índice (em Pontos)' ||
+                    m.CAMPO === 'Índice (Em Pontos)'
+                )
+            );
+            if (indicesEmPontos.length !== 4) {
+                const erro = `P3: Esperado 4 índices em pontos, encontrado ${indicesEmPontos.length}`;
+                console.log(`❌ Padrão 3 falhou: ${erro}`);
+                console.log(`🔍 Campos encontrados com "Pontos": ${indicesEmPontos.map(m => `${m.TIPOINDICE} - ${m.CAMPO}`).join(', ')}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log('✅ Padrão 3: Índices em pontos corretos (4)');
+            }
+
+            // PADRÃO 4: Deve ter pelo menos 16 seções de variação mensal (4 tipos x 4 campos cada)
+            // Layout antigo: pode ter "ICEC (Índice Mensal)" ao invés de "ICEC (Variação Mensal)"
+            const variacaoMensal = metadados.filter(m => 
+                m.TIPOINDICE && (
+                    m.TIPOINDICE.includes('(Variação Mensal)') ||
+                    m.TIPOINDICE.includes('(Índice Mensal)') // Formato histórico 2012
+                )
+            );
+            if (variacaoMensal.length < 12) { // Ajustado para 12 mínimo (formato 2012)
+                const erro = `P4: Esperado >=12 seções de variação mensal, encontrado ${variacaoMensal.length}`;
+                console.log(`❌ Padrão 4 falhou: ${erro}`);
+                console.log(`🔍 Seções encontradas: ${variacaoMensal.map(m => m.TIPOINDICE).join(', ')}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 4: Seções de variação mensal suficientes (${variacaoMensal.length})`);
+            }
+
+            // PADRÃO 5: Tipos de índices essenciais devem existir (incluindo variações históricas)
+            const tiposEssenciais = [
+                // Variações para "Condição Atual da Economia"
+                'Condição Atual da Economia',
+                'Condições Atuais da Economia', // Versão 2012 (plural)
+                
+                // Variações para "Condição do Setor"  
+                'Condição Atual do Setor',
+                'Condição ãtual do Setor', // Note o acento diferente no ã
+                'Condições Atuais do Setor', // Versão 2012 (plural)
+                
+                // Variações para "Condição da Empresa"
+                'Condição Atual da Empresa',
+                'Condições Atuais da Empresa', // Versão 2012 (plural)
+                
+                // Variações para "Expectativa para Economia"
+                'Expectativa para Economia',
+                'Expectativa para a Economia', // Versão 2012 (com "a")
+                'Expectativa para Economia Brasileira',
+                
+                // Demais seções essenciais
+                'Expectativa para Setor',
+                'Expectativa para Empresa',
+                'Expectativa Contratação',
+                'Nível de Investimento',
+                'Situação Atual dos Estoques'
+            ];
+            
+            // Tipos únicos encontrados nos metadados (sem variação mensal)
+            const tiposUnicos = new Set(metadados
+                .map(m => m.TIPOINDICE)
+                .filter(t => t && !t.includes('(Variação Mensal)'))
+            );
+            
+            // Verificar quantos tipos essenciais foram encontrados
+            let gruposEncontrados = 0;
+            const tiposFaltando: string[] = [];
+            
+            const gruposEssenciais = [
+                ['Condição Atual da Economia', 'Condições Atuais da Economia'],
+                ['Condição Atual do Setor', 'Condição ãtual do Setor', 'Condições Atuais do Setor'],
+                ['Condição Atual da Empresa', 'Condições Atuais da Empresa'],
+                ['Expectativa para Economia', 'Expectativa para a Economia', 'Expectativa para Economia Brasileira'],
+                ['Expectativa para Setor'],
+                ['Expectativa para Empresa'],
+                ['Expectativa Contratação'],
+                ['Nível de Investimento'],
+                ['Situação Atual dos Estoques']
+            ];
+            
+            for (const grupo of gruposEssenciais) {
+                const encontrado = grupo.some(variacao => 
+                    Array.from(tiposUnicos).some(tipo => tipo.includes(variacao))
+                );
+                
+                if (encontrado) {
+                    gruposEncontrados++;
+                } else {
+                    tiposFaltando.push(grupo[0]); // Usar a primeira variação como referência
+                }
+            }
+            
+            if (gruposEncontrados < 6) {
+                const erro = `P5: Esperado >=6 tipos essenciais, encontrado ${gruposEncontrados}. Faltando: ${tiposFaltando.join(', ')}`;
+                console.log(`❌ Padrão 5 falhou: ${erro}`);
+                console.log(`🔍 Tipos únicos encontrados: ${Array.from(tiposUnicos).join(', ')}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 5: Tipos de índices essenciais presentes (${gruposEncontrados}/9 grupos)`);
+            }
+
+            // PADRÃO 6: Deve ter dados numéricos válidos nos índices finais
+            const indicesFinais = metadados.filter(m => 
+                m.CAMPO === 'Índice (em Pontos)' || m.CAMPO === 'Índice'
+            );
+            
+            let indicesComDados = 0;
+            for (const indice of indicesFinais) {
+                const total = parseFloat(indice.TOTAL);
+                if (!isNaN(total) && total > 10 && total < 300) { // Ajustado range baseado nos dados reais
+                    indicesComDados++;
+                }
+            }
+            
+            if (indicesComDados < 4) {
+                const erro = `P6: Esperado >=4 índices com dados válidos, encontrado ${indicesComDados}`;
+                console.log(`❌ Padrão 6 falhou: ${erro}`);
+                console.log(`🔍 Índices encontrados: ${indicesFinais.map(i => `${i.TIPOINDICE} - ${i.CAMPO}: ${i.TOTAL}`).join(', ')}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 6: Índices com dados numéricos válidos (${indicesComDados})`);
+            }
+
+            // PADRÃO 7: Estrutura de campos por tipo de índice
+            const camposEsperados = ['Melhoram muito', 'Melhoram', 'Melhorar muito', 'Melhorar', 'Pioram', 'Piorar', 'Índice', 'Adequada', 'Acima', 'Abaixo'];
+            const tiposComEstrutura = metadados.reduce((acc, m) => {
+                if (!acc[m.TIPOINDICE]) acc[m.TIPOINDICE] = new Set();
+                acc[m.TIPOINDICE].add(m.CAMPO);
+                return acc;
+            }, {} as Record<string, Set<string>>);
+
+            let tiposComEstruturaCorreta = 0;
+            Object.entries(tiposComEstrutura).forEach(([tipo, campos]) => {
+                if (tipo && !tipo.includes('(Variação Mensal)')) {
+                    const temEstruturaPadrao = Array.from(campos).some(campo => 
+                        camposEsperados.some(esperado => 
+                            campo.toLowerCase().includes(esperado.toLowerCase())
+                        )
+                    );
+                    if (temEstruturaPadrao) tiposComEstruturaCorreta++;
+                }
+            });
+
+            if (tiposComEstruturaCorreta < 6) {
+                const erro = `P7: Esperado >=6 tipos com estrutura padrão, encontrado ${tiposComEstruturaCorreta}`;
+                console.log(`❌ Padrão 7 falhou: ${erro}`);
+                console.log(`🔍 Tipos sem variação mensal: ${Object.keys(tiposComEstrutura).filter(t => t && !t.includes('(Variação Mensal)')).join(', ')}`);
+                inconsistencias.push(erro);
+            } else {
+                console.log(`✅ Padrão 7: Estrutura de campos adequada (${tiposComEstruturaCorreta} tipos)`);
+            }
+
+            if (inconsistencias.length === 0) {
+                console.log('✅ Todos os padrões estruturais validados com sucesso!');
+                return { valid: true };
+            } else {
+                return { valid: false, inconsistencies: inconsistencias.join(' | ') };
+            }
+            
+        } catch (error) {
+            console.log(`❌ Erro ao validar layout da planilha ICEC: ${error}`);
+            // Em caso de erro, assumir layout inconsistente para investigação
+            return { valid: false, inconsistencies: `Erro na validação: ${error}` };
+        }
+    }    // ========================================
     // SEÇÃO 3: MÉTODOS DE METADADOS
     // ========================================
 
     /**
-     * Versão adaptada do transformJsonToICEC que lida com o layout quebrado
-     * A partir do mês 9/2025, o governo mudou os cabeçalhos de variação mensal
-     * de "Total", "Empresas com até 50 empregados" para "0", "0", "0", etc.
+     * Versão adaptada do transformJsonToICEC que lida com múltiplos layouts históricos
+     * Suporta layouts de 2012 (plural) até 2025 (singular + layout quebrado)
+     * - Layout 2012: "Condições Atuais da Economia" (plural)
+     * - Layout atual: "Condição Atual da Economia" (singular) 
+     * - Layout quebrado 2025: cabeçalhos com zeros
      */
     private transformJsonToICEC(jsonData: any[][]): any {
         const result: any[] = [];
@@ -157,6 +367,36 @@ export class IcecService {
         // Função helper para verificar se é a primeira linha inválida (com nulls e "Porte")
         const isInvalidFirstLine = (row: any[]): boolean => {
             return row[0] === null && row[1] === null && row[2] === "Porte";
+        };
+
+        // Função para normalizar nomes de seções históricas
+        const normalizeSectionName = (name: string): string => {
+            if (!name || typeof name !== 'string') return name;
+            
+            // Normalizar variações históricas para formato padrão
+            const normalizations: Record<string, string> = {
+                // Condições Atuais -> Condição Atual (plural para singular)
+                'Condições Atuais da Economia': 'Condição Atual da Economia',
+                'Condições Atuais do Setor (Comércio)': 'Condição Atual do Setor (Comércio)',
+                'Condições Atuais da Empresa': 'Condição Atual da Empresa',
+                
+                // Expectativas com "a" -> sem "a"
+                'Expectativa para a Economia': 'Expectativa para Economia',
+                'Expectativa para a Economia Brasileira': 'Expectativa para Economia Brasileira',
+                
+                // Variações com "ã" e "à"
+                'Condição ãtual do Setor (Comércio)': 'Condição Atual do Setor (Comércio)',
+                
+                // Variações de contratação
+                'Expectativa Contratação de Funcionários': 'Expectativa Contratação de Funcionário',
+                'Expectativa Contratação de Funcionário': 'Expectativa Contratação de Funcionário',
+                
+                // Variações de seções de variação mensal (formato histórico 2012)
+                'ICEC (Índice Mensal)': 'ICEC (Variação Mensal)'
+            };
+            
+            // Aplicar normalização se existir
+            return normalizations[name] || name;
         };
 
         // Função para extrair o tipo de pesquisa da coluna 7 do cabeçalho
@@ -171,18 +411,80 @@ export class IcecService {
             return currentTipoPesquisa;
         };
 
+        // Função para inferir tipo de pesquisa baseado no nome da seção (para layouts antigos sem identificadores)
+        const inferTipoPesquisaFromSectionName = (sectionName: string): string => {
+            if (!sectionName || typeof sectionName !== 'string') return '';
+            
+            const normalized = sectionName.toLowerCase().trim();
+            
+            // Mapeamento baseado nos padrões históricos identificados (2016 e anteriores)
+            const mappings = {
+                // ICAEC - Índice de Condições Atuais da Economia do Comércio
+                'condição atual da economia': 'ICAEC',
+                'condições atuais da economia': 'ICAEC',
+                'condicoes atuais da economia': 'ICAEC', // sem acento, formato 2016
+                'condição atual do setor': 'ICAEC',
+                'condições atuais do setor': 'ICAEC',
+                'condicoes atuais do setor': 'ICAEC',
+                
+                // IEEC - Índice de Expectativas da Economia do Comércio  
+                'condição atual da empresa': 'IEEC',
+                'condições atuais da empresa': 'IEEC',
+                'expectativa para economia brasileira': 'IEEC',
+                'expectativa para economia': 'IEEC',
+                'expectativa para empresa': 'IEEC',
+                
+                // IIEC - Índice de Investimento Esperado do Comércio
+                'expectativa para setor': 'IIEC',
+                'expectativa para setor (comércio)': 'IIEC',
+                'expectativas para contratação': 'IIEC',
+                'expectativas para contratação de funcionários': 'IIEC',
+                'expectativa contratação': 'IIEC',
+                'nível de investimento': 'IIEC',
+                'situação atual dos estoques': 'IIEC',
+                
+                // ICEC - Índice de Confiança do Empresário do Comércio (índice geral)
+                'icec': 'ICEC',
+                'icec (índice mensal)': 'ICEC',
+                'icec (variação mensal)': 'ICEC',
+                'índice': 'ICEC',
+                'índice (variação mensal)': 'ICEC',
+                'índice (em pontos)': 'ICEC'
+            };
+            
+            // Busca correspondência exata primeiro
+            if (mappings[normalized]) {
+                return mappings[normalized];
+            }
+            
+            // Busca por correspondência parcial para casos com variações de formato
+            for (const [pattern, type] of Object.entries(mappings)) {
+                if (normalized.includes(pattern)) {
+                    return type;
+                }
+            }
+            
+            // Fallback: busca por códigos diretos no nome
+            if (normalized.includes('icaec')) return 'ICAEC';
+            if (normalized.includes('ieec')) return 'IEEC';
+            if (normalized.includes('iiec')) return 'IIEC';
+            if (normalized.includes('icec')) return 'ICEC';
+            
+            return '';
+        };
+
         // Função para identificar cabeçalhos de variação mensal com layout quebrado
         const isVariacaoMensalQuebraHeader = (row: any[]): boolean => {
             // Novo formato: linha tem nome da categoria e depois zeros
             const nomeCategoria = row[0];
             if (!nomeCategoria || typeof nomeCategoria !== 'string') return false;
-            
+
             // Verificar se é uma das categorias de variação mensal conhecidas
             const isVariacaoMensal = nomeCategoria.includes('(Variação Mensal)');
-            
+
             // Verificar se as próximas colunas são zeros
             const hasZeros = row[1] === 0 && row[2] === 0 && row[3] === 0;
-            
+
             return isVariacaoMensal && hasZeros;
         };
 
@@ -208,12 +510,22 @@ export class IcecService {
                     result.push(currentTipo);
                 }
 
-                // Extrai o tipo de pesquisa do cabeçalho
-                currentTipoPesquisa = extractTipoPesquisa(row);
+                // Extrai o tipo de pesquisa do cabeçalho (método principal)
+                let tipoPesquisa = extractTipoPesquisa(row);
+                
+                // Se não encontrou pela coluna 7, tenta inferir pelo nome da seção (layouts antigos)
+                if (!tipoPesquisa) {
+                    tipoPesquisa = inferTipoPesquisaFromSectionName(row[0]);
+                }
+                
+                // Atualiza o tipo de pesquisa atual
+                if (tipoPesquisa) {
+                    currentTipoPesquisa = tipoPesquisa;
+                }
 
-                // Cria novo tipo
+                // Cria novo tipo com normalização histórica
                 currentTipo = {
-                    tipo: row[0],
+                    tipo: normalizeSectionName(row[0]),
                     valores: []
                 };
             } else if (currentTipo && row[0] && row[1] !== undefined) {
@@ -827,11 +1139,17 @@ export class IcecService {
 
         for (const period of periods) {
             for (const regiao of regioes) {
+
                 try {
                     console.log(LogMessages.processando('ICEC', regiao, period.mes, period.ano));
 
                     const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
                     const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}`);
+
+                    // Validar layout da planilha
+                    const layoutValidation = await this.isExcelLayoutValid(currentFilePath);
+                    const layoutStatus = layoutValidation.valid ? 'padrão' : 'inconsistente';
+                    const inconsistenciaLayout = layoutValidation.inconsistencies;
 
                     // Extrair dados completos diretamente da planilha
                     const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
@@ -851,7 +1169,9 @@ export class IcecService {
                         regiao,
                         status: 'Sucesso',
                         servico: 'ICEC',
-                        metodo: Metodo.PLA
+                        metodo: Metodo.PLA,
+                        layout: layoutStatus,
+                        inconsistenciaLayout: inconsistenciaLayout
                     });
 
                     console.log(LogMessages.sucesso('ICEC', regiao, period.mes, period.ano));

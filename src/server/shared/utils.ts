@@ -457,14 +457,23 @@ export function transformJsonToPEIC(jsonData: any[][]): peicXLSXCompleta {
         }
 
         // Verifica se é uma linha de cabeçalho (nova categoria)
-        // Para PEIC normal: "total - %" | "até 10sm - %" | "mais de 10sm - %"
-        // Para PEIC (Sintese): "Numero Absoluto" | null | null
-        const isNormalHeader = row[1] === "total - %" && row[2] === "até 10sm - %" &&
+        // Para PEIC normal: "total - %" | "até 10sm - %" | "mais de 10sm - %" (layout 2025+)
+        // Para PEIC normal (2016): "total" | "até 10 sm" | "mais de 10 sm"
+        // Para PEIC (Sintese): "Numero Absoluto" | null | null (layout 2025+)
+        // Para PEIC (Sintese 2016): "Total (absoluto)" | null | null
+        const isNormalHeaderModerno = row[1] === "total - %" && row[2] === "até 10sm - %" &&
             row[3] && row[3].includes("mais de 10sm");
+            
+        const isNormalHeader2016 = row[1] === "total" && row[2] === "até 10 sm" &&
+            row[3] === "mais de 10 sm";
 
-        const isSinteseHeader = row[1] === "Numero Absoluto" && row[2] === null && row[3] === null;
+        const isSinteseHeaderModerno = row[1] === "Numero Absoluto" && row[2] === null && row[3] === null;
+        
+        const isSinteseHeader2016 = row[1] === "Total (absoluto)" && row[2] === null && row[3] === null;
+        
+        const isHeader = isNormalHeaderModerno || isNormalHeader2016 || isSinteseHeaderModerno || isSinteseHeader2016;
 
-        if (isNormalHeader || isSinteseHeader) {
+        if (isHeader) {
             // Se já existe um tipo atual, adiciona ao resultado
             if (currentTipo) {
                 result.push(currentTipo);

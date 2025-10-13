@@ -180,6 +180,8 @@ export class NotificationService {
                 'Região': task.regiao,
                 'Status': task.status,
                 'Método': task.metodo,
+                'Layout': task.layout || 'N/A',
+                'Inconsistência Layout': task.inconsistenciaLayout || '',
                 'Erro': task.erro || ''
             }));
 
@@ -305,14 +307,19 @@ export class NotificationService {
                 <p><strong>Regiões Apuradas:</strong> ${regioesApuradas.join(', ')}</p>
                 
                 <div class="stats">📊 <strong>Total de Registros:</strong> ${resultado.totalRegistros}</div>
+
                 <br>
                 
                 <div class="stats">✅ <strong>Sucessos:</strong> ${resultado.sucessos}</div>
                 <div class="stats">📄 <strong>Por Planilha:</strong> ${resultado.registrosPlanilha}</div>
                 <div class="stats">🌐 <strong>Por Web Scraping:</strong> ${resultado.registrosWebScraping}</div>
                 <br>
-                
+
                 <div class="stats">❌ <strong>Falhas:</strong> ${resultado.falhas}</div>
+                <br>
+
+                <div class="stats">⚠️ <strong>Planilhas fora do padrão:</strong> ${resultado.tasks.filter(task => task.layout === 'inconsistente').length}</div>
+
                 <br>
                 
                 <div class="stats ${statusClass}">🎯 <strong>Taxa de Sucesso:</strong> ${taxaSucesso}%</div>

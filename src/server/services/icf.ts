@@ -140,6 +140,87 @@ export class IcfService {
         }
     }
 
+    /**
+     * Valida se o layout da planilha ICF está conforme o padrão esperado
+     * Compara com arquivo de referência na pasta baseFiles
+     * @param filePath Caminho da planilha atual a ser validada
+     * @returns Objeto com resultado da validação e detalhes das inconsistências
+     */
+    private async isExcelLayoutValid(filePath: string): Promise<{valid: boolean, inconsistencies?: string}> {
+        try {
+            // Caminho do arquivo de referência padrão
+            const baseFilePath = path.join(__dirname, '../../../baseFiles/ICF.xls');
+            
+            // Verificar se arquivo de referência existe
+            if (!await fs.pathExists(baseFilePath)) {
+                console.log('⚠️ Arquivo de referência ICF.xls não encontrado em baseFiles, assumindo layout padrão');
+                return { valid: true };
+            }
+
+            // Ler ambas as planilhas
+            const currentWorkbook = XLSX.readFile(filePath);
+            const baseWorkbook = XLSX.readFile(baseFilePath);
+
+            const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
+            const baseSheet = baseWorkbook.Sheets[baseWorkbook.SheetNames[0]];
+
+            const currentData = XLSX.utils.sheet_to_json(currentSheet, { header: 1, defval: null }) as any[][];
+            const baseData = XLSX.utils.sheet_to_json(baseSheet, { header: 1, defval: null }) as any[][];
+
+            // Verificar cabeçalhos críticos das seções ICF
+            const sectionsToCheck = [
+                'Índice (Em Pontos)',
+                'Índice (Variação Mensal)'
+            ];
+
+            for (const section of sectionsToCheck) {
+                const currentSectionRow = this.findSectionHeaderRow(currentData, section);
+                const baseSectionRow = this.findSectionHeaderRow(baseData, section);
+
+                if (currentSectionRow && baseSectionRow) {
+                    // Comparar as colunas 1-3 dos cabeçalhos (NC, Até 10 SM, Mais de 10 SM)
+                    const currentHeaders = currentSectionRow.slice(1, 4);
+                    const baseHeaders = baseSectionRow.slice(1, 4);
+
+                    // Verificar se os cabeçalhos são diferentes
+                    const headersMatch = JSON.stringify(currentHeaders) === JSON.stringify(baseHeaders);
+                    
+                    if (!headersMatch) {
+                        const inconsistencia = `Seção ${section}: Esperado [${baseHeaders.join(', ')}], Encontrado [${currentHeaders.join(', ')}]`;
+                        console.log(`🚨 Layout inconsistente detectado na seção: ${section}`);
+                        console.log(`   Esperado: [${baseHeaders.join(', ')}]`);
+                        console.log(`   Encontrado: [${currentHeaders.join(', ')}]`);
+                        return { valid: false, inconsistencies: inconsistencia };
+                    }
+                }
+            }
+
+            console.log('✅ Layout da planilha ICF está conforme o padrão');
+            return { valid: true };
+
+        } catch (error) {
+            console.log(`❌ Erro ao validar layout da planilha ICF: ${error}`);
+            // Em caso de erro, assumir layout padrão para não interromper processamento
+            return { valid: true, inconsistencies: `Erro na validação: ${error}` };
+        }
+    }
+
+    /**
+     * Encontra a linha do cabeçalho de uma seção específica
+     * @param data Dados da planilha
+     * @param sectionName Nome da seção a procurar
+     * @returns Array da linha encontrada ou null
+     */
+    private findSectionHeaderRow(data: any[][], sectionName: string): any[] | null {
+        for (let i = 0; i < data.length; i++) {
+            const row = data[i];
+            if (row && row[0] && typeof row[0] === 'string' && row[0].includes(sectionName)) {
+                return row;
+            }
+        }
+        return null;
+    }
+
     // ========================================
     // SEÇÃO 3: MÉTODOS DE METADADOS
     // ========================================
@@ -1025,6 +1106,11 @@ export class IcfService {
                     const currentUrl = this.buildUrl(period.mes, period.ano, regiao);
                     const currentFilePath = await this.downloadExcelFile(currentUrl, `${regiao}_${period.mes}${period.ano}`);
 
+                    // Validar layout da planilha
+                    const layoutValidation = await this.isExcelLayoutValid(currentFilePath);
+                    const layoutStatus = layoutValidation.valid ? 'padrão' : 'inconsistente';
+                    const inconsistenciaLayout = layoutValidation.inconsistencies;
+
                     const completeData = await this.extractCompleteDataFromExcel(currentFilePath);
                     completeData.data.MES = period.mes;
                     completeData.data.ANO = period.ano;
@@ -1049,11 +1135,13 @@ export class IcfService {
                             status: 'Sucesso',
                             servico: 'ICF',
                             metodo: Metodo.PLA,
+                            layout: layoutStatus,
+                            inconsistenciaLayout: inconsistenciaLayout,
                             erro: 'Variação mensal ausente - será calculada manualmente'
                         });
 
                         registrosPlanilha++;
-                        console.log(LogMessages.sucesso('PEIC', regiao, period.mes, period.ano));
+                        console.log(LogMessages.sucesso('ICF', regiao, period.mes, period.ano));
 
                         continue; // Não salvar agora, será calculado depois
                     }
@@ -1069,7 +1157,9 @@ export class IcfService {
                         regiao,
                         status: 'Sucesso',
                         servico: 'ICF',
-                        metodo: Metodo.PLA
+                        metodo: Metodo.PLA,
+                        layout: layoutStatus,
+                        inconsistenciaLayout: inconsistenciaLayout
                     });
 
                     console.log(LogMessages.sucesso('ICF', regiao, period.mes, period.ano));
