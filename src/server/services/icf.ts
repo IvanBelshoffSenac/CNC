@@ -146,57 +146,224 @@ export class IcfService {
      * @param filePath Caminho da planilha atual a ser validada
      * @returns Objeto com resultado da validação e detalhes das inconsistências
      */
-    private async isExcelLayoutValid(filePath: string): Promise<{valid: boolean, inconsistencies?: string}> {
+    private async isExcelLayoutValid(filePath: string): Promise<{ valid: boolean, inconsistencies?: string }> {
         try {
-            // Caminho do arquivo de referência padrão
-            const baseFilePath = path.join(__dirname, '../../../baseFiles/ICF.xls');
+            console.log('🔍 Validando layout ICF baseado em padrões estruturais...');
+
+            const metadados = await this.extractMetadataFromExcel(filePath);
+            const inconsistencias: string[] = [];
+
+            // ========================================
+            // VALIDAÇÕES PADRÃO ICF
+            // ========================================
+
+            // 1. Detectar layout (histórico vs moderno) baseado na quantidade de metadados
+            const layoutHistorico = metadados.length === 46; // Layout 2012-2020 (seção ICF expandida)
+            const layoutModerno = metadados.length === 45;   // Layout 2021+ (seção ICF concisa)
             
-            // Verificar se arquivo de referência existe
-            if (!await fs.pathExists(baseFilePath)) {
-                console.log('⚠️ Arquivo de referência ICF.xls não encontrado em baseFiles, assumindo layout padrão');
-                return { valid: true };
+            let expectedMetadadosCount: number;
+            let layoutTipo: string;
+            
+            if (layoutHistorico) {
+                expectedMetadadosCount = 46;
+                layoutTipo = 'histórico (2012-2020)';
+                console.log('🔍 Layout ICF histórico detectado (2012-2020): 46 metadados');
+            } else if (layoutModerno) {
+                expectedMetadadosCount = 45;
+                layoutTipo = 'moderno (2021+)';
+                console.log('🔍 Layout ICF moderno detectado (2021+): 45 metadados');
+            } else {
+                expectedMetadadosCount = metadados.length > 45 ? 46 : 45;
+                layoutTipo = 'desconhecido';
+                inconsistencias.push(`Quantidade de metadados inesperada: ${metadados.length} (esperado: 45 ou 46)`);
             }
 
-            // Ler ambas as planilhas
-            const currentWorkbook = XLSX.readFile(filePath);
-            const baseWorkbook = XLSX.readFile(baseFilePath);
+            // Validar quantidade de metadados apenas se não for um layout conhecido
+            if (!layoutHistorico && !layoutModerno) {
+                inconsistencias.push(`Total de metadados: ${metadados.length} (esperado: 45 para moderno ou 46 para histórico)`);
+            }
 
-            const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
-            const baseSheet = baseWorkbook.Sheets[baseWorkbook.SheetNames[0]];
-
-            const currentData = XLSX.utils.sheet_to_json(currentSheet, { header: 1, defval: null }) as any[][];
-            const baseData = XLSX.utils.sheet_to_json(baseSheet, { header: 1, defval: null }) as any[][];
-
-            // Verificar cabeçalhos críticos das seções ICF
-            const sectionsToCheck = [
-                'Índice (Em Pontos)',
-                'Índice (Variação Mensal)'
+            // 2. Validar estrutura dos tipos de índices ICF baseado no layout detectado
+            const expectedTipos = layoutHistorico ? [
+                // Layout histórico: 7 seções (ICF Variação Mensal incluída em Momento para Duráveis)
+                'Emprego Atual',
+                'Perspectiva Profissional', 
+                'Renda Atual',
+                'Compra a Prazo (Acesso ao crédito)',
+                'Nível de Consumo Atual',
+                'Perspectiva de Consumo',
+                'Momento para Duráveis'
+            ] : [
+                // Layout moderno: 8 seções (ICF Variação Mensal separada)
+                'Emprego Atual',
+                'Perspectiva Profissional', 
+                'Renda Atual',
+                'Compra a Prazo (Acesso ao crédito)',
+                'Nível de Consumo Atual',
+                'Perspectiva de Consumo',
+                'Momento para Duráveis',
+                'ICF (Variação Mensal)'
             ];
 
-            for (const section of sectionsToCheck) {
-                const currentSectionRow = this.findSectionHeaderRow(currentData, section);
-                const baseSectionRow = this.findSectionHeaderRow(baseData, section);
+            const tiposEncontrados = [...new Set(metadados.map(m => m.TIPOINDICE))];
+            
+            for (const tipoEsperado of expectedTipos) {
+                if (!tiposEncontrados.includes(tipoEsperado)) {
+                    inconsistencias.push(`Tipo de índice ausente: ${tipoEsperado}`);
+                }
+            }
 
-                if (currentSectionRow && baseSectionRow) {
-                    // Comparar as colunas 1-3 dos cabeçalhos (NC, Até 10 SM, Mais de 10 SM)
-                    const currentHeaders = currentSectionRow.slice(1, 4);
-                    const baseHeaders = baseSectionRow.slice(1, 4);
+            // 3. Validar quantidade de tipos baseada no layout
+            const expectedTipoCount = layoutHistorico ? 7 : 8;
+            if (tiposEncontrados.length !== expectedTipoCount) {
+                inconsistencias.push(`Quantidade de tipos: ${tiposEncontrados.length} (esperado: ${expectedTipoCount} para layout ${layoutTipo})`);
+            }
 
-                    // Verificar se os cabeçalhos são diferentes
-                    const headersMatch = JSON.stringify(currentHeaders) === JSON.stringify(baseHeaders);
+            // 4. Validar campos esperados para cada tipo baseado no layout detectado
+            const expectedCamposPorTipo = layoutHistorico ? {
+                // Layout histórico (2012-2020): ICF (Variação Mensal) tem 15 campos (expandida)
+                'Emprego Atual': [
+                    'Mais seguro', 'Menos seguro', 'Igual ao ano passado', 'Estou desempregado', 'Não sabe / Não respondeu', 'Índice'
+                ],
+                'Perspectiva Profissional': [
+                    'Sim (Positiva)', 'Não (Negativa)', 'Não sabe', 'Não respondeu', 'Índice'
+                ],
+                'Renda Atual': [
+                    'Melhor', 'Pior', 'Igual a do ano passado', 'Não sabe / não respondeu', 'Índice'
+                ],
+                'Compra a Prazo (Acesso ao crédito)': [
+                    'Mais Fácil', 'Mais Difícil', 'Igual ao ano passado', 'Não sabe / não respondeu', 'Índice'
+                ],
+                'Nível de Consumo Atual': [
+                    'Estamos comprando mais (Maior)', 'Estamos comprando menos (Menor)', 'Estamos comprando a mesma coisa (Igual)', 'Não sabe / Não respondeu', 'Índice'
+                ],
+                'Perspectiva de Consumo': [
+                    'Maior que o segundo semestre do ano passado (Maior)', 'Menor que o segundo semestre do ano passado (Menor)', 'Igual ao segundo semestre do ano passado (Igual) ', 'Não sabe / Não respondeu', 'Índice'
+                ],
+                'Momento para Duráveis': [
+                    // Layout histórico: Momento para Duráveis incluiu toda a seção ICF (Variação Mensal) - 15 campos
+                    'Bom', 'Mau', 'Não Sabe', 'Não Respondeu', 'Índice',
+                    'ICF (Variação Mensal)', 'Emprego Atual', 'Perspectiva Profissional', 'Renda Atual',
+                    'Compra a Prazo (Acesso ao crédito)', 'Nível de Consumo Atual', 'Perspectiva de Consumo',
+                    'Momento para Duráveis', 'Índice (Variação Mensal)', 'Índice (Em Pontos)'
+                ]
+                // Nota: Layout histórico não tem seção separada "ICF (Variação Mensal)"
+            } : {
+                // Layout moderno (2021+): ICF (Variação Mensal) tem 9 campos (concisa)
+                'Emprego Atual': [
+                    'Mais seguro', 'Menos seguro', 'Igual ao ano passado', 'Estou desempregado', 'Não sabe / Não respondeu', 'Índice'
+                ],
+                'Perspectiva Profissional': [
+                    'Sim (Positiva)', 'Não (Negativa)', 'Não sabe', 'Não respondeu', 'Índice'
+                ],
+                'Renda Atual': [
+                    'Melhor', 'Pior', 'Igual a do ano passado', 'Não sabe / não respondeu', 'Índice'
+                ],
+                'Compra a Prazo (Acesso ao crédito)': [
+                    'Mais Fácil', 'Mais Difícil', 'Igual ao ano passado', 'Não sabe / não respondeu', 'Índice'
+                ],
+                'Nível de Consumo Atual': [
+                    'Estamos comprando mais (Maior)', 'Estamos comprando menos (Menor)', 'Estamos comprando a mesma coisa (Igual)', 'Não sabe / Não respondeu', 'Índice'
+                ],
+                'Perspectiva de Consumo': [
+                    'Maior que o segundo semestre do ano passado (Maior)', 'Menor que o segundo semestre do ano passado (Menor)', 'Igual ao segundo semestre do ano passado (Igual) ', 'Não sabe / Não respondeu', 'Índice'
+                ],
+                'Momento para Duráveis': [
+                    'Bom', 'Mau', 'Não Sabe', 'Não Respondeu', 'Índice'
+                ],
+                'ICF (Variação Mensal)': [
+                    'Emprego Atual', 'Perspectiva Profissional', 'Renda Atual', 'Compra a Prazo (Acesso ao crédito)',
+                    'Nível de Consumo Atual', 'Perspectiva de Consumo', 'Momento para Duráveis',
+                    'Índice (Variação Mensal)', 'Índice (Em Pontos)'
+                ]
+            };
+
+            // Validar campos por tipo
+            for (const [tipo, camposEsperados] of Object.entries(expectedCamposPorTipo)) {
+                const metadadosDoTipo = metadados.filter(m => m.TIPOINDICE === tipo);
+                const camposEncontrados = metadadosDoTipo.map(m => m.CAMPO);
+
+                // Validação especial para layout histórico
+                if (layoutHistorico && tipo === 'Momento para Duráveis') {
+                    // Layout histórico: "Momento para Duráveis" deve ter exatamente 15 campos
+                    if (metadadosDoTipo.length !== 15) {
+                        inconsistencias.push(`Tipo "${tipo}": ${metadadosDoTipo.length} campos (esperado: 15 para layout histórico)`);
+                    }
                     
-                    if (!headersMatch) {
-                        const inconsistencia = `Seção ${section}: Esperado [${baseHeaders.join(', ')}], Encontrado [${currentHeaders.join(', ')}]`;
-                        console.log(`🚨 Layout inconsistente detectado na seção: ${section}`);
-                        console.log(`   Esperado: [${baseHeaders.join(', ')}]`);
-                        console.log(`   Encontrado: [${currentHeaders.join(', ')}]`);
-                        return { valid: false, inconsistencies: inconsistencia };
+                    // Verificar se contém os campos essenciais do Momento para Duráveis
+                    const camposEssenciais = ['Bom', 'Mau', 'Não Sabe', 'Não Respondeu', 'Índice'];
+                    for (const campoEssencial of camposEssenciais) {
+                        if (!camposEncontrados.includes(campoEssencial)) {
+                            inconsistencias.push(`Campo essencial ausente no tipo "${tipo}": ${campoEssencial}`);
+                        }
+                    }
+                    
+                    // Verificar se contém os campos da variação mensal
+                    const camposVariacao = ['ICF (Variação Mensal)', 'Índice (Variação Mensal)', 'Índice (Em Pontos)'];
+                    for (const campoVariacao of camposVariacao) {
+                        if (!camposEncontrados.includes(campoVariacao)) {
+                            inconsistencias.push(`Campo de variação ausente no tipo "${tipo}": ${campoVariacao}`);
+                        }
+                    }
+                    
+                } else if (layoutHistorico && tipo === 'ICF (Variação Mensal)') {
+                    // Layout histórico não deve ter seção separada "ICF (Variação Mensal)"
+                    if (metadadosDoTipo.length > 0) {
+                        inconsistencias.push(`Tipo "${tipo}" não deveria existir no layout histórico (incluído em "Momento para Duráveis")`);
+                    }
+                    
+                } else {
+                    // Validação padrão para outros tipos
+                    for (const campoEsperado of camposEsperados) {
+                        if (!camposEncontrados.includes(campoEsperado)) {
+                            inconsistencias.push(`Campo ausente no tipo "${tipo}": ${campoEsperado}`);
+                        }
+                    }
+
+                    // Verificar quantidade exata de campos por tipo
+                    if (metadadosDoTipo.length !== camposEsperados.length) {
+                        inconsistencias.push(`Tipo "${tipo}": ${metadadosDoTipo.length} campos (esperado: ${camposEsperados.length})`);
                     }
                 }
             }
 
-            console.log('✅ Layout da planilha ICF está conforme o padrão');
-            return { valid: true };
+            // 5. Validar se todos os tipos têm pelo menos um campo "Índice"
+            for (const tipo of expectedTipos) {
+                const metadadosDoTipo = metadados.filter(m => m.TIPOINDICE === tipo);
+                const temIndice = metadadosDoTipo.some(m => m.CAMPO && m.CAMPO.includes('Índice'));
+                
+                if (!temIndice) {
+                    inconsistencias.push(`Tipo "${tipo}": sem campo índice`);
+                }
+            }
+
+            // 4. Validar campos obrigatórios não vazios
+            const camposObrigatorios = ['TIPOINDICE', 'CAMPO'];
+            for (const metadado of metadados) {
+                for (const campo of camposObrigatorios) {
+                    if (!metadado[campo] || metadado[campo].trim() === '') {
+                        inconsistencias.push(`Campo obrigatório vazio: ${campo} no registro ${metadado.CAMPO || 'indefinido'}`);
+                    }
+                }
+            }
+
+            const isValid = inconsistencias.length === 0;
+            
+            if (isValid) {
+                console.log(`✅ Layout ICF validado com sucesso: ${metadados.length} metadados extraídos (layout ${layoutTipo})`);
+                return { valid: true };
+            } else {
+                const inconsistenciaStr = inconsistencias.slice(0, 5).join('; ') + 
+                    (inconsistencias.length > 5 ? ` e mais ${inconsistencias.length - 5} problemas` : '');
+                
+                console.log(`⚠️ Layout ICF com inconsistências: ${inconsistencias.length} problemas detectados (layout ${layoutTipo})`);
+                console.log(`📋 Primeiras inconsistências: ${inconsistencias.slice(0, 3).join('; ')}`);
+                
+                return { 
+                    valid: false, 
+                    inconsistencies: inconsistenciaStr 
+                };
+            }
 
         } catch (error) {
             console.log(`❌ Erro ao validar layout da planilha ICF: ${error}`);
@@ -1128,21 +1295,6 @@ export class IcfService {
                             regiao: regiao
                         });
 
-                        tasks.push({
-                            mes: period.mes,
-                            ano: period.ano,
-                            regiao,
-                            status: 'Sucesso',
-                            servico: 'ICF',
-                            metodo: Metodo.PLA,
-                            layout: layoutStatus,
-                            inconsistenciaLayout: inconsistenciaLayout,
-                            erro: 'Variação mensal ausente - será calculada manualmente'
-                        });
-
-                        registrosPlanilha++;
-                        console.log(LogMessages.sucesso('ICF', regiao, period.mes, period.ano));
-
                         continue; // Não salvar agora, será calculado depois
                     }
 
@@ -1182,6 +1334,7 @@ export class IcfService {
 
         // Processar períodos com variação mensal ausente
         if (periodsWithMissingVariation.length > 0) {
+            
             console.log(`\n🔧 Processando ${periodsWithMissingVariation.length} períodos com variação mensal ausente...`);
 
             const successfulCalculations = await this.calculateMissingVariations(periodsWithMissingVariation);
@@ -1197,9 +1350,9 @@ export class IcfService {
 
                 if (taskIndex !== -1) {
                     // Verificar se este período foi calculado com sucesso
-                    const wasCalculated = successfulCalculations.some(calc => 
-                        calc.MES === period.mes && 
-                        calc.ANO === period.ano && 
+                    const wasCalculated = successfulCalculations.some(calc =>
+                        calc.MES === period.mes &&
+                        calc.ANO === period.ano &&
                         calc.REGIAO === period.regiao
                     );
 
