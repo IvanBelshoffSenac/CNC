@@ -532,13 +532,15 @@ export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
         const row = jsonData[i];
 
         // Verifica se é uma linha de cabeçalho (nova categoria)
-        // Suporta dois formatos:
+        // Suporta três formatos:
         // Layout atual: row[1] === "TOTAL" && row[2] === "até 10sm - %" && row[3].includes("mais de 10sm")
-        // Layout antigo: row[1] === "total - %" && row[2] === "até 10sm - %" && row[3].includes("mais de 10sm")
+        // Layout antigo: row[1] === "total - %" && row[2] === "até 10sm - %" && row[3].includes("mais de 10sm")  
+        // Layout ICF em pontos: row[1] === "total - % (em pontos)" && row[2] === "até 10sm - % (em pontos)" && row[3].includes("mais de 10sm - % (em pontos)")
         const isHeaderLayoutAtual = row[1] === "TOTAL" && row[2] === "até 10sm - %" && row[3] && row[3].toString().includes("mais de 10sm");
         const isHeaderLayoutAntigo = row[1] === "total - %" && row[2] === "até 10sm - %" && row[3] && row[3].toString().includes("mais de 10sm");
+        const isHeaderLayoutICFPontos = row[1] === "total - % (em pontos)" && row[2] === "até 10sm - % (em pontos)" && row[3] && row[3].toString().includes("mais de 10sm - % (em pontos)");
         
-        if (isHeaderLayoutAtual || isHeaderLayoutAntigo) {
+        if (isHeaderLayoutAtual || isHeaderLayoutAntigo || isHeaderLayoutICFPontos) {
             // Se já existe um tipo atual, adiciona ao resultado
             if (currentTipo) {
                 result.push(currentTipo);
@@ -581,16 +583,43 @@ export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
     }
 
     // Detectar layout histórico baseado em características específicas:
-    // 1. Seção "Momento para Duráveis" tem mais de 5 campos (histórico tem 15, moderno tem 5)
-    // 2. Seção "Momento para Duráveis" contém campo "ICF (Variação Mensal)"
+    // 1. Buscar por "Índice (Variação Mensal)" em QUALQUER parte dos dados extraídos
+    // 2. Se existe, então é layout histórico com variação mensal (2012/05)
+    // 3. Se não existe, verificar se "Momento para Duráveis" tem campos misturados
+    
+    let hasVariacaoMensalAnywhere = false;
+    for (const tipo of result) {
+        for (const valor of tipo.valores) {
+            if (valor.tipo === 'Índice (Variação Mensal)') {
+                hasVariacaoMensalAnywhere = true;
+                break;
+            }
+        }
+        if (hasVariacaoMensalAnywhere) break;
+    }
+    
     const momentoDuraveisTipo = result.find(tipo => tipo.tipo === 'Momento para Duráveis');
     const hasICFInMomento = momentoDuraveisTipo?.valores.some(valor => valor.tipo === 'ICF (Variação Mensal)') || false;
     const momentoFieldCount = momentoDuraveisTipo?.valores.length || 0;
     
-    // Layout histórico: "Momento para Duráveis" tem ICF embutido E mais de 10 campos
-    const isLayoutHistorico = hasICFInMomento && momentoFieldCount > 10;
+    // Verificar se "Momento para Duráveis" tem campos que pertencem ao ICF (campos misturados)
+    const camposICFEmMomento = momentoDuraveisTipo?.valores.some(valor => 
+        ['Emprego Atual', 'Perspectiva Profissional', 'Renda Atual', 'Acesso ao crédito', 
+         'Compra a Prazo (Acesso ao crédito)', 'Nível de Consumo Atual', 'Perspectiva de Consumo',
+         'ICF (em pontos)', 'Índice (Em Pontos)'].includes(valor.tipo)
+    ) || false;
     
-    if (isLayoutHistorico) {
+    // Layout histórico COM variação mensal: tem "Índice (Variação Mensal)" E campos misturados
+    const isLayoutHistoricoComVariacao = hasVariacaoMensalAnywhere && 
+                                        (hasICFInMomento || camposICFEmMomento || momentoFieldCount > 10);
+    
+    // Layout histórico SEM variação mensal mas COM campos misturados: tem campos ICF em Momento para Duráveis
+    const isLayoutHistoricoSemVariacaoMisturado = !hasVariacaoMensalAnywhere && camposICFEmMomento;
+    
+    // Layout normal SEM variação mensal e SEM mistura: estrutura padrão
+    const isLayoutNormalSemVariacao = !hasVariacaoMensalAnywhere && !camposICFEmMomento;
+    
+    if (isLayoutHistoricoComVariacao) {
         console.log('🔍 Layout histórico ICF detectado (2012-2020) - aplicando correção de estrutura...');
         
         // Encontrar a seção "Momento para Duráveis" que contém dados misturados
@@ -605,9 +634,9 @@ export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
             // Campos que pertencem ao "ICF (Variação Mensal)"
             const camposICFVariacao = [
                 'Emprego Atual', 'Perspectiva Profissional', 'Renda Atual', 
-                'Compra a Prazo (Acesso ao crédito)', 'Nível de Consumo Atual', 
-                'Perspectiva de Consumo', 'Momento para Duráveis', 
-                'Índice (Variação Mensal)', 'Índice (Em Pontos)'
+                'Compra a Prazo (Acesso ao crédito)', 'Acesso ao crédito', // Ambas as variações do nome
+                'Nível de Consumo Atual', 'Perspectiva de Consumo', 'Momento para Duráveis', 
+                'ICF (em pontos)', 'Índice (Variação Mensal)', 'Índice (Em Pontos)'
             ];
             
             // Separar os campos em duas listas
@@ -620,6 +649,10 @@ export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
                 } else if (camposICFVariacao.includes(valor.tipo) || valor.tipo === 'ICF (Variação Mensal)') {
                     // Se for o campo "ICF (Variação Mensal)", ignorar (é apenas cabeçalho)
                     if (valor.tipo !== 'ICF (Variação Mensal)') {
+                        // Correção de nomenclatura: "Índice (Em Pontos)" deve ser "ICF (em pontos)" 
+                        if (valor.tipo === 'Índice (Em Pontos)') {
+                            valor.tipo = 'ICF (em pontos)';
+                        }
                         valoresICFVariacao.push(valor);
                     }
                 } else {
@@ -661,8 +694,88 @@ export function transformJsonToICF(jsonData: any[][]): icfXLSXCompleta {
                 }
             }
             
-            console.log('✅ Layout histórico corrigido: campos separados adequadamente');
+            console.log('✅ Layout histórico COM variação mensal corrigido: campos separados adequadamente');
         }
+    } else if (isLayoutHistoricoSemVariacaoMisturado) {
+        console.log('🔍 Layout histórico SEM variação mensal MAS com campos misturados detectado (ex: 2012/03 problemático)');
+        console.log('🔧 Separando campos misturados em "Momento para Duráveis"...');
+        
+        // Encontrar a seção "Momento para Duráveis" que contém dados misturados
+        const momentoDuraveisTipo = result.find(tipo => tipo.tipo === 'Momento para Duráveis');
+        
+        if (momentoDuraveisTipo) {
+            console.log(`🔧 Separando campos misturados em "Momento para Duráveis" (${momentoDuraveisTipo.valores.length} campos)...`);
+            
+            // Campos que pertencem genuinamente ao "Momento para Duráveis"
+            const camposMomentoDuraveis = ['Bom', 'Mau', 'Não Sabe', 'Não Respondeu', 'Índice'];
+            
+            // Campos que pertencem ao "ICF (em pontos)" (seção separada)
+            const camposICFPontos = [
+                'Emprego Atual', 'Perspectiva Profissional', 'Renda Atual', 
+                'Compra a Prazo (Acesso ao crédito)', 'Acesso ao crédito',
+                'Nível de Consumo Atual', 'Perspectiva de Consumo', 'Momento para Duráveis',
+                'ICF (em pontos)', 'Índice (Em Pontos)'
+            ];
+            
+            // Separar os campos em duas listas
+            const valoresMomento = [];
+            const valoresICFPontos = [];
+            
+            for (const valor of momentoDuraveisTipo.valores) {
+                if (camposMomentoDuraveis.includes(valor.tipo)) {
+                    valoresMomento.push(valor);
+                } else if (camposICFPontos.includes(valor.tipo)) {
+                    // Correção de nomenclatura: "Índice (Em Pontos)" deve ser "ICF (em pontos)" 
+                    if (valor.tipo === 'Índice (Em Pontos)') {
+                        valor.tipo = 'ICF (em pontos)';
+                    }
+                    valoresICFPontos.push(valor);
+                } else {
+                    // Campos não identificados - manter em Momento para Duráveis por segurança
+                    console.log(`⚠️ Campo não identificado: ${valor.tipo} - mantendo em Momento para Duráveis`);
+                    valoresMomento.push(valor);
+                }
+            }
+            
+            console.log(`📊 Separação concluída:`);
+            console.log(`  - Momento para Duráveis: ${valoresMomento.length} campos`);
+            console.log(`  - ICF (em pontos): ${valoresICFPontos.length} campos`);
+            
+            // Atualizar "Momento para Duráveis" apenas com seus campos genuínos
+            momentoDuraveisTipo.valores = valoresMomento;
+            
+            // Verificar se já existe seção "ICF (em pontos)"
+            let icfPontosSection = result.find(tipo => tipo.tipo === 'ICF (em pontos)');
+            
+            if (!icfPontosSection && valoresICFPontos.length > 0) {
+                console.log('🆕 Criando seção separada "ICF (em pontos)" com os campos extraídos...');
+                
+                // Criar nova seção com os campos extraídos
+                icfPontosSection = {
+                    tipo: 'ICF (em pontos)',
+                    valores: valoresICFPontos
+                };
+                
+                result.push(icfPontosSection);
+            } else if (icfPontosSection && valoresICFPontos.length > 0) {
+                console.log('🔄 Mesclando campos extraídos com seção "ICF (em pontos)" existente...');
+                
+                // Mesclar com seção existente, evitando duplicatas
+                for (const valor of valoresICFPontos) {
+                    const jaExiste = icfPontosSection.valores.some(v => v.tipo === valor.tipo);
+                    if (!jaExiste) {
+                        icfPontosSection.valores.push(valor);
+                    }
+                }
+            }
+            
+            console.log('✅ Layout histórico SEM variação mensal corrigido: campos separados adequadamente');
+        }
+        
+    } else if (isLayoutNormalSemVariacao) {
+        console.log('✅ Layout normal SEM variação mensal detectado - estrutura padrão mantida');
+        console.log('ℹ️ Este período não possui "Índice (Variação Mensal)" e tem estrutura correta');
+        
     } else {
         console.log('✅ Layout moderno ICF detectado (2021+) - estrutura padrão mantida');
     }

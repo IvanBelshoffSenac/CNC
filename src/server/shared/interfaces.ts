@@ -57,6 +57,11 @@ export interface ITask {
     erro?: string;
 }
 
+export interface idsIcf {
+    id: string;
+    possuiVariacaoMensal: boolean;
+}
+
 export interface IServiceResult {
     servico: 'ICF' | 'ICEC' | 'PEIC';
     periodoInicio: string;

@@ -5,7 +5,7 @@ import * as path from 'path';
 import { chromium } from 'playwright';
 import { icfRepository, metadadosIcfRepository } from '../database/repositories';
 import { Icf, MetadadosIcf } from '../database/entities';
-import { Regiao, Metodo, IErrorService, ITask, IServiceResult, IPeriod } from '../shared/interfaces';
+import { Regiao, Metodo, IErrorService, ITask, IServiceResult, IPeriod, idsIcf } from '../shared/interfaces';
 import {
     generateServicePeriods,
     extractServicePeriodRange,
@@ -57,6 +57,43 @@ export class IcfService {
     private parseValueToString(value: any): string {
         if (value === null || value === undefined) return '';
         return String(value);
+    }
+
+    /**
+     * Converte valores numéricos para formato padronizado com casas decimais
+     * Normaliza valores obtidos via web scraping para compatibilidade com MySQL DECIMAL(10,4)
+     * @param value Valor a ser convertido (string, number ou null/undefined)
+     * @returns String formatada com 4 casas decimais ou "0.0000" para valores inválidos
+     */
+    private converteCasasDecimais(value: any): string {
+        // Tratar valores nulos ou indefinidos
+        if (value === null || value === undefined || value === '') {
+            return '0.0000';
+        }
+
+        try {
+            // Converter para string e limpar
+            let stringValue = String(value).trim();
+
+            // Substituir vírgula por ponto (formato brasileiro para formato padrão)
+            stringValue = stringValue.replace(',', '.');
+
+            // Tentar converter para número
+            const numericValue = parseFloat(stringValue);
+
+            // Verificar se é um número válido
+            if (isNaN(numericValue)) {
+                console.log(`⚠️ Valor inválido detectado: "${value}" - usando 0.0000`);
+                return '0.0000';
+            }
+
+            // Retornar com 4 casas decimais fixas (compatível com DECIMAL(10,4))
+            return numericValue.toFixed(4);
+
+        } catch (error) {
+            console.log(`❌ Erro ao converter valor "${value}": ${error} - usando 0.0000`);
+            return '0.0000';
+        }
     }
 
     /**
@@ -160,10 +197,10 @@ export class IcfService {
             // 1. Detectar layout (histórico vs moderno) baseado na quantidade de metadados
             const layoutHistorico = metadados.length === 46; // Layout 2012-2020 (seção ICF expandida)
             const layoutModerno = metadados.length === 45;   // Layout 2021+ (seção ICF concisa)
-            
+
             let expectedMetadadosCount: number;
             let layoutTipo: string;
-            
+
             if (layoutHistorico) {
                 expectedMetadadosCount = 46;
                 layoutTipo = 'histórico (2012-2020)';
@@ -187,7 +224,7 @@ export class IcfService {
             const expectedTipos = layoutHistorico ? [
                 // Layout histórico: 7 seções (ICF Variação Mensal incluída em Momento para Duráveis)
                 'Emprego Atual',
-                'Perspectiva Profissional', 
+                'Perspectiva Profissional',
                 'Renda Atual',
                 'Compra a Prazo (Acesso ao crédito)',
                 'Nível de Consumo Atual',
@@ -196,7 +233,7 @@ export class IcfService {
             ] : [
                 // Layout moderno: 8 seções (ICF Variação Mensal separada)
                 'Emprego Atual',
-                'Perspectiva Profissional', 
+                'Perspectiva Profissional',
                 'Renda Atual',
                 'Compra a Prazo (Acesso ao crédito)',
                 'Nível de Consumo Atual',
@@ -206,7 +243,7 @@ export class IcfService {
             ];
 
             const tiposEncontrados = [...new Set(metadados.map(m => m.TIPOINDICE))];
-            
+
             for (const tipoEsperado of expectedTipos) {
                 if (!tiposEncontrados.includes(tipoEsperado)) {
                     inconsistencias.push(`Tipo de índice ausente: ${tipoEsperado}`);
@@ -289,7 +326,7 @@ export class IcfService {
                     if (metadadosDoTipo.length !== 15) {
                         inconsistencias.push(`Tipo "${tipo}": ${metadadosDoTipo.length} campos (esperado: 15 para layout histórico)`);
                     }
-                    
+
                     // Verificar se contém os campos essenciais do Momento para Duráveis
                     const camposEssenciais = ['Bom', 'Mau', 'Não Sabe', 'Não Respondeu', 'Índice'];
                     for (const campoEssencial of camposEssenciais) {
@@ -297,7 +334,7 @@ export class IcfService {
                             inconsistencias.push(`Campo essencial ausente no tipo "${tipo}": ${campoEssencial}`);
                         }
                     }
-                    
+
                     // Verificar se contém os campos da variação mensal
                     const camposVariacao = ['ICF (Variação Mensal)', 'Índice (Variação Mensal)', 'Índice (Em Pontos)'];
                     for (const campoVariacao of camposVariacao) {
@@ -305,13 +342,13 @@ export class IcfService {
                             inconsistencias.push(`Campo de variação ausente no tipo "${tipo}": ${campoVariacao}`);
                         }
                     }
-                    
+
                 } else if (layoutHistorico && tipo === 'ICF (Variação Mensal)') {
                     // Layout histórico não deve ter seção separada "ICF (Variação Mensal)"
                     if (metadadosDoTipo.length > 0) {
                         inconsistencias.push(`Tipo "${tipo}" não deveria existir no layout histórico (incluído em "Momento para Duráveis")`);
                     }
-                    
+
                 } else {
                     // Validação padrão para outros tipos
                     for (const campoEsperado of camposEsperados) {
@@ -331,7 +368,7 @@ export class IcfService {
             for (const tipo of expectedTipos) {
                 const metadadosDoTipo = metadados.filter(m => m.TIPOINDICE === tipo);
                 const temIndice = metadadosDoTipo.some(m => m.CAMPO && m.CAMPO.includes('Índice'));
-                
+
                 if (!temIndice) {
                     inconsistencias.push(`Tipo "${tipo}": sem campo índice`);
                 }
@@ -348,20 +385,20 @@ export class IcfService {
             }
 
             const isValid = inconsistencias.length === 0;
-            
+
             if (isValid) {
                 console.log(`✅ Layout ICF validado com sucesso: ${metadados.length} metadados extraídos (layout ${layoutTipo})`);
                 return { valid: true };
             } else {
-                const inconsistenciaStr = inconsistencias.slice(0, 5).join('; ') + 
+                const inconsistenciaStr = inconsistencias.slice(0, 5).join('; ') +
                     (inconsistencias.length > 5 ? ` e mais ${inconsistencias.length - 5} problemas` : '');
-                
+
                 console.log(`⚠️ Layout ICF com inconsistências: ${inconsistencias.length} problemas detectados (layout ${layoutTipo})`);
                 console.log(`📋 Primeiras inconsistências: ${inconsistencias.slice(0, 3).join('; ')}`);
-                
-                return { 
-                    valid: false, 
-                    inconsistencies: inconsistenciaStr 
+
+                return {
+                    valid: false,
+                    inconsistencies: inconsistenciaStr
                 };
             }
 
@@ -370,22 +407,6 @@ export class IcfService {
             // Em caso de erro, assumir layout padrão para não interromper processamento
             return { valid: true, inconsistencies: `Erro na validação: ${error}` };
         }
-    }
-
-    /**
-     * Encontra a linha do cabeçalho de uma seção específica
-     * @param data Dados da planilha
-     * @param sectionName Nome da seção a procurar
-     * @returns Array da linha encontrada ou null
-     */
-    private findSectionHeaderRow(data: any[][], sectionName: string): any[] | null {
-        for (let i = 0; i < data.length; i++) {
-            const row = data[i];
-            if (row && row[0] && typeof row[0] === 'string' && row[0].includes(sectionName)) {
-                return row;
-            }
-        }
-        return null;
     }
 
     // ========================================
@@ -419,10 +440,10 @@ export class IcfService {
                     metadado.TIPOINDICE = tipo.tipo;
                     metadado.CAMPO = valor.tipo;
 
-                    // Salvar dados brutos como string
-                    metadado.TOTAL = this.parseValueToString(valor.total);
-                    metadado.ATE_10_SM = this.parseValueToString(valor["até 10sm - %"]);
-                    metadado.MAIS_DE_10_SM = this.parseValueToString(valor["mais de 10sm - %"]);
+                    // Aplicar normalização nos valores para garantir compatibilidade com MySQL DECIMAL(10,4)
+                    metadado.TOTAL = valor.total;
+                    metadado.ATE_10_SM = valor["até 10sm - %"];
+                    metadado.MAIS_DE_10_SM = valor["mais de 10sm - %"];
                     metadado.INDICE = valor.indice;
 
                     metadados.push(metadado);
@@ -437,12 +458,165 @@ export class IcfService {
     }
 
     /**
-     * Processa extração de metadados para todos os registros ICF obtidos via planilha
-     * Localiza arquivos já baixados e extrai metadados detalhados
-     * @param idsIcf Array com IDs dos registros ICF para processamento de metadados
+     * Extrai metadados de uma planilha com fallback para dados do banco
      */
-    private async processMetadataForPlanilhaRecords(idsIcf: string[]): Promise<void> {
+    private async extractMetadataFromExcelWithFallback(
+        caminhoArquivo: string, 
+        periodo: { mes: number; ano: number; regiao: string },
+        possuiVariacaoMensal: boolean = true
+    ): Promise<MetadadosIcf[]> {
         try {
+            // Tentar extrair metadados da planilha
+            const metadados = await this.extractMetadataFromExcel(caminhoArquivo);
+            
+            // Se não possui variação mensal, completar com dados do banco
+            if (!possuiVariacaoMensal) {
+                console.log(`🔧 Completando metadados com dados do banco para período sem variação mensal: ${periodo.regiao} ${periodo.mes}/${periodo.ano}`);
+                return await this.completarMetadadosComDadosDoBanco(metadados, periodo);
+            }
+            
+            return metadados;
+        } catch (error) {
+            console.log(`⚠️ Erro ao extrair metadados da planilha: ${error.message}`);
+            console.log(`📋 Arquivo de planilha não encontrado ou inválido para ${periodo.regiao} ${periodo.mes}/${periodo.ano}`);
+            
+            // Retornar array vazio como fallback
+            console.log(`ℹ️ Retornando metadados vazios para ${periodo.regiao} ${periodo.mes}/${periodo.ano}`);
+            return [];
+        }
+    }
+
+    /**
+     * Completa metadados com dados do banco para períodos sem variação mensal
+     * Busca dados ICF no banco e adiciona campo "Índice (Variação Mensal)" com os percentuais
+     */
+    private async completarMetadadosComDadosDoBanco(
+        metadados: MetadadosIcf[], 
+        periodo: { mes: number; ano: number; regiao: string }
+    ): Promise<MetadadosIcf[]> {
+        try {
+            // Buscar dados ICF no banco para este período/região
+            const icfDoBanco = await icfRepository.findOne({
+                where: {
+                    MES: periodo.mes,
+                    ANO: periodo.ano,
+                    REGIAO: periodo.regiao as any
+                }
+            });
+
+            if (!icfDoBanco) {
+                console.log(`⚠️ Dados ICF não encontrados no banco para ${periodo.regiao} ${periodo.mes}/${periodo.ano}`);
+                return metadados;
+            }
+
+            console.log(`✅ Dados ICF encontrados no banco: NC_PERCENTUAL=${icfDoBanco.NC_PERCENTUAL}, ATE_10_SM_PERCENTUAL=${icfDoBanco.ATE_10_SM_PERCENTUAL}, MAIS_DE_10_SM_PERCENTUAL=${icfDoBanco.MAIS_DE_10_SM_PERCENTUAL}`);
+
+            // Verificar se existe seção "ICF (em pontos)" nos metadados (nova estrutura corrigida)
+            const icfPontosExiste = metadados.some(m => m.TIPOINDICE === 'ICF (em pontos)');
+
+            if (icfPontosExiste) {
+                console.log(`ℹ️ Seção "ICF (em pontos)" existe, adicionando campo "Índice (Variação Mensal)"...`);
+                
+                // Verificar se já existe o campo "Índice (Variação Mensal)" na seção "ICF (em pontos)"
+                const indiceVariacaoExiste = metadados.find(m => 
+                    m.TIPOINDICE === 'ICF (em pontos)' && 
+                    m.CAMPO === 'Índice (Variação Mensal)'
+                );
+
+                if (!indiceVariacaoExiste) {
+                    console.log(`🆕 Adicionando campo "Índice (Variação Mensal)" na seção "ICF (em pontos)" com dados do banco...`);
+                    
+                    // Criar novo metadado com os percentuais do banco
+                    const novoMetadado = new MetadadosIcf();
+                    novoMetadado.TIPOINDICE = 'ICF (em pontos)';
+                    novoMetadado.CAMPO = 'Índice (Variação Mensal)';
+                    novoMetadado.TOTAL = icfDoBanco.NC_PERCENTUAL;
+                    novoMetadado.ATE_10_SM = icfDoBanco.ATE_10_SM_PERCENTUAL;
+                    novoMetadado.MAIS_DE_10_SM = icfDoBanco.MAIS_DE_10_SM_PERCENTUAL;
+                    novoMetadado.INDICE = true; // Marcar como índice
+                    
+                    metadados.push(novoMetadado);
+                    
+                    console.log(`✅ Campo "Índice (Variação Mensal)" adicionado à seção "ICF (em pontos)": TOTAL=${novoMetadado.TOTAL}, ATE_10_SM=${novoMetadado.ATE_10_SM}, MAIS_DE_10_SM=${novoMetadado.MAIS_DE_10_SM}`);
+                } else {
+                    console.log(`ℹ️ Campo "Índice (Variação Mensal)" já existe na seção "ICF (em pontos)"`);
+                }
+                
+            } else {
+                // Para compatibilidade com estrutura antiga, verificar seção "ICF (Variação Mensal)"
+                const icfVariacaoExiste = metadados.some(m => m.TIPOINDICE === 'ICF (Variação Mensal)');
+
+                if (icfVariacaoExiste) {
+                    console.log(`ℹ️ Seção "ICF (Variação Mensal)" existe (estrutura antiga), completando campos...`);
+                    
+                    // Procurar pelo campo "ICF (em pontos)" que pode estar com valores zerados
+                    const icfEmPontosMeta = metadados.find(m => 
+                        m.TIPOINDICE === 'ICF (Variação Mensal)' && 
+                        (m.CAMPO === 'ICF (em pontos)' || m.CAMPO === 'Índice (Em Pontos)')
+                    );
+
+                    if (icfEmPontosMeta) {
+                        console.log(`🔧 Corrigindo valores do campo "${icfEmPontosMeta.CAMPO}" com dados do banco...`);
+                        
+                        // Usar os valores de PONTOS ao invés de PERCENTUAL para "ICF (em pontos)"
+                        icfEmPontosMeta.TOTAL = icfDoBanco.NC_PONTOS;
+                        icfEmPontosMeta.ATE_10_SM = icfDoBanco.ATE_10_SM_PONTOS;
+                        icfEmPontosMeta.MAIS_DE_10_SM = icfDoBanco.MAIS_DE_10_SM_PONTOS;
+                        icfEmPontosMeta.INDICE = true; // Marcar como índice
+                        
+                        console.log(`✅ Valores corrigidos: TOTAL=${icfEmPontosMeta.TOTAL}, ATE_10_SM=${icfEmPontosMeta.ATE_10_SM}, MAIS_DE_10_SM=${icfEmPontosMeta.MAIS_DE_10_SM}`);
+                    }
+
+                    // Procurar se existe campo "Índice (Variação Mensal)" para adicionar percentuais
+                    const indiceVariacaoMeta = metadados.find(m => 
+                        m.TIPOINDICE === 'ICF (Variação Mensal)' && 
+                        m.CAMPO === 'Índice (Variação Mensal)'
+                    );
+
+                    if (!indiceVariacaoMeta) {
+                        console.log(`🆕 Adicionando campo "Índice (Variação Mensal)" com dados do banco...`);
+                        
+                        // Criar novo metadado com os percentuais do banco
+                        const novoMetadado = new MetadadosIcf();
+                        novoMetadado.TIPOINDICE = 'ICF (Variação Mensal)';
+                        novoMetadado.CAMPO = 'Índice (Variação Mensal)';
+                        novoMetadado.TOTAL = icfDoBanco.NC_PERCENTUAL;
+                        novoMetadado.ATE_10_SM = icfDoBanco.ATE_10_SM_PERCENTUAL;
+                        novoMetadado.MAIS_DE_10_SM = icfDoBanco.MAIS_DE_10_SM_PERCENTUAL;
+                        novoMetadado.INDICE = true; // Marcar como índice
+                        
+                        metadados.push(novoMetadado);
+                        
+                        console.log(`✅ Campo adicionado: TOTAL=${novoMetadado.TOTAL}, ATE_10_SM=${novoMetadado.ATE_10_SM}, MAIS_DE_10_SM=${novoMetadado.MAIS_DE_10_SM}`);
+                    }
+                } else {
+                    console.log(`ℹ️ Nenhuma seção ICF encontrada para completar metadados`);
+                }
+            }
+
+            return metadados;
+
+        } catch (error) {
+            console.log(`❌ Erro ao completar metadados com dados do banco: ${error.message}`);
+            return metadados; // Retornar metadados originais em caso de erro
+        }
+    }
+
+    /**
+     * Processa extração de metadados para todos os registros ICF obtidos via planilha
+     * Localiza arquivos já baixados e extrai metadados detalhados com tratamento diferenciado
+     * para períodos com e sem variação mensal
+     * @param registros Array com objetos contendo ID e informação sobre variação mensal dos registros ICF
+     */
+    private async processMetadataForPlanilhaRecords(registros: idsIcf[]): Promise<void> {
+        try {
+            if (registros.length === 0) {
+                console.log('ℹ️ Nenhum registro ICF fornecido para processamento de metadados');
+                return;
+            }
+
+            const idsIcf = registros.map(r => r.id);
+
             // 1. Filtrar todos os registros de ICF do método 'Planilha'
             const registrosPlanilha = await icfRepository.find({
                 where: { id: In(idsIcf) },
@@ -453,7 +627,7 @@ export class IcfService {
                 relations: {
                     icf: true
                 }
-            })
+            });
 
             if (registrosPlanilha.length === 0) {
                 console.log('ℹ️ Nenhum registro ICF do tipo Planilha encontrado');
@@ -462,34 +636,34 @@ export class IcfService {
 
             console.log(`📊 Encontrados ${registrosPlanilha.length} registros ICF do tipo Planilha`);
 
-            interface IPeriodRegion extends IPeriod {
+            interface IPeriodRegionWithVariation extends IPeriod {
                 regiao: Regiao;
+                possuiVariacaoMensal: boolean;
             }
 
-            // 2. Mapear os registros para extrair períodos únicos por região
-            const periodosMap = new Map<string, IPeriodRegion>();
+            // 2. Mapear os registros para extrair períodos únicos por região com informação de variação
+            const periodosMap = new Map<string, IPeriodRegionWithVariation>();
 
             for (const registro of registrosPlanilha) {
                 const chaveperiodo = `${registro.MES}-${registro.ANO}-${registro.REGIAO}`;
                 if (!periodosMap.has(chaveperiodo)) {
+                    // Buscar informação sobre variação mensal do registro correspondente
+                    const registroInfo = registros.find(r => r.id === registro.id);
+                    const possuiVariacaoMensal = registroInfo?.possuiVariacaoMensal ?? true;
+
                     periodosMap.set(chaveperiodo, {
                         mes: registro.MES,
                         ano: registro.ANO,
-                        regiao: registro.REGIAO
+                        regiao: registro.REGIAO,
+                        possuiVariacaoMensal
                     });
                 }
             }
 
-            const periodos: IPeriodRegion[] = Array.from(periodosMap.values());
+            const periodos: IPeriodRegionWithVariation[] = Array.from(periodosMap.values());
             console.log(`📅 Períodos únicos identificados: ${periodos.length}`);
 
-            // Interface para acumular metadados que serão salvos
-            interface MetadataToSave {
-                metadados: MetadadosIcf[];
-                icfId: string;
-            }
-
-            // 3. Para cada período/região, localizar a planilha já baixada e processar metadados
+            // 3. Para cada período/região, processar metadados com tratamento diferenciado
             for (const periodo of periodos) {
                 try {
                     console.log(`📥 Processando metadados para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}...`);
@@ -502,29 +676,48 @@ export class IcfService {
                         continue;
                     }
 
-                    // Extrair metadados da planilha existente
-                    const metadados = await this.extractMetadataFromExcel(filePath);
+                    // Buscar todos os registros ICF que correspondem a este período/região
+                    const registrosParaPeriodo = registrosPlanilha.filter((r) =>
+                        r.MES === periodo.mes && r.ANO === periodo.ano && r.REGIAO === periodo.regiao
+                    );
+
+                    // Verificar se já existem metadados para este período
+                    const metadatosExistentes = registrosMetadados.filter((m) =>
+                        m.icf && registrosParaPeriodo.some((r) => r.id === m.icf.id)
+                    );
+
+                    if (metadatosExistentes.length > 0) {
+                        console.log(`ℹ️ Metadados já existem para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
+                        continue;
+                    }
+
+                    // Extrair metadados baseado na disponibilidade de variação mensal
+                    let metadados: MetadadosIcf[];
+
+                    if (periodo.possuiVariacaoMensal) {
+                        // Período com variação mensal: usar extração padrão
+                        console.log(`✅ Período com variação mensal - usando extração padrão`);
+                        metadados = await this.extractMetadataFromExcel(filePath);
+                    } else {
+                        // Período sem variação mensal: usar extração com fallback
+                        console.log(`⚠️ Período sem variação mensal - usando extração com fallback`);
+                        metadados = await this.extractMetadataFromExcelWithFallback(
+                            filePath, 
+                            {
+                                mes: periodo.mes,
+                                ano: periodo.ano,
+                                regiao: periodo.regiao
+                            },
+                            periodo.possuiVariacaoMensal
+                        );
+                    }
 
                     if (metadados.length > 0) {
-                        // Buscar todos os registros ICF que correspondem a este período/região
-                        const registrosParaPeriodo = registrosPlanilha.filter((r) =>
-                            r.MES === periodo.mes && r.ANO === periodo.ano && r.REGIAO === periodo.regiao
-                        );
-
-                        // Verificar se já existem metadados para este período
-                        const metadatosExistentes = registrosMetadados.filter((m) =>
-                            m.icf && registrosParaPeriodo.some((r) => r.id === m.icf.id)
-                        );
-
-                        if (metadatosExistentes.length === 0 && registrosParaPeriodo.length > 0) {
-                            // Salvar metadados individualmente para cada registro ICF do período
-                            for (const registro of registrosParaPeriodo) {
-                                await this.saveIndividualMetadataToDatabase(metadados, registro);
-                            }
-                            console.log(`✅ Metadados processados e salvos para ${registrosParaPeriodo.length} registros ICF`);
-                        } else {
-                            console.log(`ℹ️ Metadados já existem para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
+                        // Salvar metadados individualmente para cada registro ICF do período
+                        for (const registro of registrosParaPeriodo) {
+                            await this.saveIndividualMetadataToDatabase(metadados, registro);
                         }
+                        console.log(`✅ Metadados processados e salvos para ${registrosParaPeriodo.length} registros ICF`);
                     } else {
                         console.log(`⚠️ Nenhum metadado extraído para período ${periodo.regiao} ${periodo.mes.toString().padStart(2, '0')}/${periodo.ano}`);
                     }
@@ -572,47 +765,6 @@ export class IcfService {
             return savedEntity.id!;
         } catch (error) {
             throw new Error(`Erro ao salvar registro ICF individual no banco: ${error}`);
-        }
-    }
-
-    /**
-     * Salva múltiplos registros ICF no banco de dados de forma otimizada
-     * Utiliza operação em lote para melhor performance
-     * @param icfDataList Array de objetos Icf para serem salvos
-     * @returns Array com os IDs dos registros salvos
-     */
-    private async saveBatchIcfToDatabase(icfDataList: Icf[]): Promise<string[]> {
-        try {
-            if (icfDataList.length === 0) {
-                return [];
-            }
-
-            const icfEntities: Icf[] = [];
-
-            for (const data of icfDataList) {
-                const icfEntity = new Icf();
-                icfEntity.NC_PONTOS = data.NC_PONTOS;
-                icfEntity.ATE_10_SM_PONTOS = data.ATE_10_SM_PONTOS;
-                icfEntity.MAIS_DE_10_SM_PONTOS = data.MAIS_DE_10_SM_PONTOS;
-                icfEntity.NC_PERCENTUAL = data.NC_PERCENTUAL;
-                icfEntity.ATE_10_SM_PERCENTUAL = data.ATE_10_SM_PERCENTUAL;
-                icfEntity.MAIS_DE_10_SM_PERCENTUAL = data.MAIS_DE_10_SM_PERCENTUAL;
-                icfEntity.MES = data.MES;
-                icfEntity.ANO = data.ANO;
-                icfEntity.REGIAO = data.REGIAO;
-                icfEntity.METODO = data.METODO;
-
-                icfEntities.push(icfEntity);
-            }
-
-            // Salvar todos de uma vez usando save() com array
-            const savedEntities = await icfRepository.save(icfEntities);
-
-            console.log(`💾 Total de registros ICF salvos: ${savedEntities.length}`);
-
-            return savedEntities.map(entity => entity.id!);
-        } catch (error) {
-            throw new Error(`Erro ao salvar lote de registros ICF no banco: ${error}`);
         }
     }
 
@@ -725,176 +877,6 @@ export class IcfService {
     // ========================================
 
     /**
-     * Calcula variações mensais ausentes para períodos que não possuem "Índice (Variação Mensal)"
-     * Usa a fórmula: ((ICF_atual / ICF_anterior) - 1) × 100%
-     * Apenas retorna períodos que conseguiram calcular com sucesso
-     * @param periodsWithMissingVariation Lista de períodos que falharam por falta de variação mensal
-     * @returns Lista corrigida de dados ICF (apenas com sucessos)
-     */
-    private async calculateMissingVariations(periodsWithMissingVariation: IErrorService[]): Promise<Icf[]> {
-
-        console.log(`\n🧮 Calculando variações mensais ausentes para ${periodsWithMissingVariation.length} períodos...`);
-
-        const correctedData: Icf[] = [];
-        const successfulCalculations: IErrorService[] = [];
-
-        for (const period of periodsWithMissingVariation) {
-            try {
-                console.log(`📊 Processando período com variação ausente: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
-
-                // 1. Localizar arquivo Excel do período atual
-                const currentFilePath = await this.findExistingExcelFile(period.regiao, period.mes, period.ano);
-                if (!currentFilePath) {
-                    console.log(`⚠️ Arquivo não encontrado para ${period.regiao} ${period.mes}/${period.ano}, período será ignorado`);
-                    continue;
-                }
-
-                // 2. Extrair apenas os pontos do período atual (sem variação mensal)
-                const currentPoints = await this.extractPointsOnlyFromExcel(currentFilePath);
-
-                // 3. Calcular período anterior
-                let prevMes = period.mes - 1;
-                let prevAno = period.ano;
-                if (prevMes === 0) {
-                    prevMes = 12;
-                    prevAno = period.ano - 1;
-                }
-
-                // 4. Localizar arquivo Excel do período anterior
-                const prevFilePath = await this.findExistingExcelFile(period.regiao, prevMes, prevAno);
-                if (!prevFilePath) {
-                    console.log(`⚠️ Arquivo do período anterior não encontrado (${period.regiao} ${prevMes.toString().padStart(2, '0')}/${prevAno}), período será ignorado`);
-                    continue;
-                }
-
-                // 5. Extrair pontos do período anterior
-                const prevPoints = await this.extractPointsOnlyFromExcel(prevFilePath);
-
-                // 6. Calcular variações mensais
-                const variations = this.calculateVariationPercentages(currentPoints, prevPoints);
-
-                // 7. Criar objeto ICF completo com variações calculadas
-                const icfData: Icf = {
-                    NC_PONTOS: currentPoints.NC_PONTOS,
-                    ATE_10_SM_PONTOS: currentPoints.ATE_10_SM_PONTOS,
-                    MAIS_DE_10_SM_PONTOS: currentPoints.MAIS_DE_10_SM_PONTOS,
-                    NC_PERCENTUAL: variations.NC_PERCENTUAL,
-                    ATE_10_SM_PERCENTUAL: variations.ATE_10_SM_PERCENTUAL,
-                    MAIS_DE_10_SM_PERCENTUAL: variations.MAIS_DE_10_SM_PERCENTUAL,
-                    MES: period.mes,
-                    ANO: period.ano,
-                    REGIAO: period.regiao as Regiao,
-                    METODO: Metodo.PLA
-                };
-
-                // Salvar registro individual
-                const savedId = await this.saveIndividualIcfToDatabase(icfData);
-                correctedData.push(icfData);
-                successfulCalculations.push(period);
-                console.log(`✅ Variação calculada e salva para ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
-
-            } catch (error) {
-                console.log(`❌ Erro ao calcular variação para ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${error}`);
-                console.log(`⚠️ Período ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} será ignorado completamente`);
-            }
-        }
-
-        const ignoredPeriods = periodsWithMissingVariation.length - successfulCalculations.length;
-        console.log(`✅ Processamento de variações concluído.`);
-        console.log(`   📊 Períodos calculados com sucesso: ${successfulCalculations.length}`);
-        console.log(`   ⚠️ Períodos ignorados (sem período anterior): ${ignoredPeriods}`);
-        console.log(`   📈 Total de registros finais: ${correctedData.length}`);
-
-        return correctedData;
-    }
-
-    /**
-     * Extrai apenas os pontos ICF de uma planilha (sem variação mensal)
-     * Busca especificamente pela linha 'Índice (Em Pontos)'
-     * @param filePath Caminho completo do arquivo Excel
-     * @returns Objeto com apenas os pontos extraídos
-     */
-    private async extractPointsOnlyFromExcel(filePath: string): Promise<{ NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string }> {
-        try {
-            const workbook = XLSX.readFile(filePath);
-            const sheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[sheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
-
-            let pontosRow: any[] | null = null;
-
-            // Buscar linha com pontos
-            for (let i = 0; i < jsonData.length; i++) {
-                const row = jsonData[i];
-                if (row && Array.isArray(row) && row.length >= 4) {
-                    const firstCell = String(row[0] || '').toLowerCase().trim();
-
-                    // Linha com os pontos
-                    if (firstCell.includes('índice (em pontos)') || firstCell.includes('índice(em pontos)')) {
-                        pontosRow = row;
-                        break;
-                    }
-                }
-            }
-
-            if (!pontosRow) {
-                throw new Error('Linha "Índice (Em Pontos)" não encontrada na planilha ICF');
-            }
-
-            // Extrair os pontos (colunas 1, 2, 3) - mantendo como string
-            const pontosData = pontosRow.slice(1, 4).map(val => String(val || ''));
-
-            return {
-                NC_PONTOS: pontosData[0],
-                ATE_10_SM_PONTOS: pontosData[1],
-                MAIS_DE_10_SM_PONTOS: pontosData[2]
-            };
-
-        } catch (error) {
-            throw new Error(`Erro ao extrair pontos da planilha ICF: ${error}`);
-        }
-    }
-
-    /**
-     * Calcula variações percentuais mensais usando a fórmula: ((atual / anterior) - 1) × 100%
-     * @param currentPoints Pontos do período atual
-     * @param prevPoints Pontos do período anterior
-     * @returns Objeto com variações calculadas como string
-     */
-    private calculateVariationPercentages(
-        currentPoints: { NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string },
-        prevPoints: { NC_PONTOS: string, ATE_10_SM_PONTOS: string, MAIS_DE_10_SM_PONTOS: string }
-    ): { NC_PERCENTUAL: string, ATE_10_SM_PERCENTUAL: string, MAIS_DE_10_SM_PERCENTUAL: string } {
-
-        const calculateVariation = (current: string, previous: string): string => {
-            try {
-                const currentVal = parseFloat(current.replace(',', '.'));
-                const prevVal = parseFloat(previous.replace(',', '.'));
-
-                if (isNaN(currentVal) || isNaN(prevVal) || prevVal === 0) {
-                    return '0';
-                }
-
-                // Fórmula: ((atual / anterior) - 1) × 100%
-                const variation = ((currentVal / prevVal) - 1) * 100;
-
-                // Retornar o valor completo sem arredondamento, apenas convertendo ponto para vírgula
-                return variation.toString().replace('.', ',');
-
-            } catch (error) {
-                console.log(`⚠️ Erro ao calcular variação: atual=${current}, anterior=${previous}`);
-                return '0';
-            }
-        };
-
-        return {
-            NC_PERCENTUAL: calculateVariation(currentPoints.NC_PONTOS, prevPoints.NC_PONTOS),
-            ATE_10_SM_PERCENTUAL: calculateVariation(currentPoints.ATE_10_SM_PONTOS, prevPoints.ATE_10_SM_PONTOS),
-            MAIS_DE_10_SM_PERCENTUAL: calculateVariation(currentPoints.MAIS_DE_10_SM_PONTOS, prevPoints.MAIS_DE_10_SM_PONTOS)
-        };
-    }
-
-    /**
      * Extrai os dados completos ICF de uma planilha Excel
      * Busca especificamente pelas linhas 'Índice (Em Pontos)' e 'Índice (Variação Mensal)'
      * Retorna dados parciais quando variação mensal não está disponível
@@ -984,16 +966,20 @@ export class IcfService {
             throw new Error(`Dados ICF completos insuficientes. Esperado: 6 valores (3 pontos + 3 percentuais), Encontrado: ${values.length}`);
         }
 
-        // Parsear valores como string preservando o valor original
+        // Normalizar valores para formato decimal padronizado (compatível com MySQL DECIMAL(10,4))
+        const normalizedValues = values.map(val => val);
+
+        console.log('📊 Valores normalizados:', normalizedValues);
+
         return {
-            // Primeiros 3 valores são os pontos - mantendo como string
-            NC_PONTOS: String(values[0] || ''),              // NC (pontos)
-            ATE_10_SM_PONTOS: String(values[1] || ''),       // Até 10 SM (pontos)
-            MAIS_DE_10_SM_PONTOS: String(values[2] || ''),   // Mais de 10 SM (pontos)
-            // Próximos 3 valores são os percentuais - mantendo como string
-            NC_PERCENTUAL: String(values[3] || ''),          // NC (percentual)
-            ATE_10_SM_PERCENTUAL: String(values[4] || ''),   // Até 10 SM (percentual)
-            MAIS_DE_10_SM_PERCENTUAL: String(values[5] || ''), // Mais de 10 SM (percentual)
+            // Primeiros 3 valores são os pontos - normalizados para DECIMAL(10,4)
+            NC_PONTOS: normalizedValues[0],              // NC (pontos)
+            ATE_10_SM_PONTOS: normalizedValues[1],       // Até 10 SM (pontos)
+            MAIS_DE_10_SM_PONTOS: normalizedValues[2],   // Mais de 10 SM (pontos)
+            // Próximos 3 valores são os percentuais - normalizados para DECIMAL(10,4)
+            NC_PERCENTUAL: normalizedValues[3],          // NC (percentual)
+            ATE_10_SM_PERCENTUAL: normalizedValues[4],   // Até 10 SM (percentual)
+            MAIS_DE_10_SM_PERCENTUAL: normalizedValues[5], // Mais de 10 SM (percentual)
             MES: 0, // Será definido posteriormente
             ANO: 0, // Será definido posteriormente
             REGIAO: 'BR' as any, // Será definido posteriormente
@@ -1261,7 +1247,7 @@ export class IcfService {
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;
         let erros: IErrorService[] = [];
-        let savedIds: string[] = [];
+        let savedIds: idsIcf[] = [];
         // Array para catalogar períodos com erro de "Índice (Variação Mensal)" não encontrada
         const periodsWithMissingVariation: IErrorService[] = [];
 
@@ -1300,7 +1286,7 @@ export class IcfService {
 
                     // Salvar registro individual
                     const savedId = await this.saveIndividualIcfToDatabase(completeData.data);
-                    savedIds.push(savedId);
+                    savedIds.push({ id: savedId, possuiVariacaoMensal: true });
                     registrosPlanilha++;
 
                     tasks.push({
@@ -1332,42 +1318,79 @@ export class IcfService {
             }
         }
 
-        // Processar períodos com variação mensal ausente
+        // Processar períodos com variação mensal ausente via web scraping
         if (periodsWithMissingVariation.length > 0) {
-            
-            console.log(`\n🔧 Processando ${periodsWithMissingVariation.length} períodos com variação mensal ausente...`);
 
-            const successfulCalculations = await this.calculateMissingVariations(periodsWithMissingVariation);
+            console.log(`\n🔧 Processando ${periodsWithMissingVariation.length} períodos com variação mensal ausente via web scraping...`);
 
-            // Atualizar tasks com base no resultado do cálculo
-            for (const period of periodsWithMissingVariation) {
-                const taskIndex = tasks.findIndex(t =>
-                    t.mes === period.mes &&
-                    t.ano === period.ano &&
-                    t.regiao === period.regiao &&
-                    t.erro?.includes('Variação mensal ausente')
-                );
+            const browser = await chromium.launch({ headless: true });
+            let sucessosWebScrapingVariacao = 0;
 
-                if (taskIndex !== -1) {
-                    // Verificar se este período foi calculado com sucesso
-                    const wasCalculated = successfulCalculations.some(calc =>
-                        calc.MES === period.mes &&
-                        calc.ANO === period.ano &&
-                        calc.REGIAO === period.regiao
-                    );
+            try {
+                const page = await browser.newPage();
 
-                    if (wasCalculated) {
-                        // Período calculado com sucesso
-                        delete tasks[taskIndex].erro;
-                        console.log(`✅ Task atualizada: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} calculado com sucesso`);
-                    } else {
-                        // Período foi ignorado por falta de período anterior
-                        tasks[taskIndex].status = 'Falha';
-                        tasks[taskIndex].erro = 'Período anterior não encontrado para cálculo de variação mensal';
-                        console.log(`❌ Task marcada como falha: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano} - período anterior não encontrado`);
+                // Fazer login
+                await this.performLogin(page);
+
+                for (const period of periodsWithMissingVariation) {
+                    try {
+                        console.log(`🌐 Buscando dados via web scraping para ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}...`);
+
+                        const data = await this.extractDataFromWebsite(page, period.mes, period.ano, period.regiao);
+
+                        data.METODO = Metodo.PLA; // Ajustar método para PLA, pois é para variação mensal da planilha
+                        data.NC_PONTOS = this.converteCasasDecimais(data.NC_PONTOS);
+                        data.ATE_10_SM_PONTOS = this.converteCasasDecimais(data.ATE_10_SM_PONTOS);
+                        data.MAIS_DE_10_SM_PONTOS = this.converteCasasDecimais(data.MAIS_DE_10_SM_PONTOS);
+                        data.NC_PERCENTUAL = this.converteCasasDecimais(data.NC_PERCENTUAL);
+                        data.ATE_10_SM_PERCENTUAL = this.converteCasasDecimais(data.ATE_10_SM_PERCENTUAL);
+                        data.MAIS_DE_10_SM_PERCENTUAL = this.converteCasasDecimais(data.MAIS_DE_10_SM_PERCENTUAL);
+
+                        const savedId = await this.saveIndividualIcfToDatabase(data);
+                        savedIds.push({ id: savedId, possuiVariacaoMensal: false });
+                        registrosPlanilha++; // Incrementar contador de registros
+                        sucessosWebScrapingVariacao++;
+
+                        // Adicionar task de sucesso
+                        tasks.push({
+                            mes: period.mes,
+                            ano: period.ano,
+                            regiao: period.regiao,
+                            status: 'Sucesso',
+                            servico: 'ICF',
+                            metodo: Metodo.PLA, // Web Scraping ao invés de Planilha
+                            layout: 'padrão' // Layout assumido como padrão para web scraping
+                        });
+
+                        console.log(`✅ Dados obtidos via web scraping: ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}`);
+
+                    } catch (scrapingError) {
+                        console.log(`❌ Erro ao obter dados via web scraping para ${period.regiao} ${period.mes.toString().padStart(2, '0')}/${period.ano}: ${scrapingError}`);
+
+                        // Adicionar aos erros para segunda tentativa
+                        erros.push({
+                            regiao: period.regiao,
+                            mes: period.mes,
+                            ano: period.ano
+                        });
+
+                        tasks.push({
+                            mes: period.mes,
+                            ano: period.ano,
+                            regiao: period.regiao,
+                            status: 'Falha',
+                            servico: 'ICF',
+                            metodo: Metodo.PLA,
+                            erro: `Variação mensal ausente na planilha, falha no web scraping: ${scrapingError}`
+                        });
                     }
                 }
+
+            } finally {
+                await browser.close();
             }
+
+            console.log(`✅ Web scraping para variações ausentes concluído: ${sucessosWebScrapingVariacao} sucessos de ${periodsWithMissingVariation.length} tentativas`);
         }
 
         // Segunda tentativa com web scraping para os erros
