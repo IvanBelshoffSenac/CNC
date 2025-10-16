@@ -8,6 +8,8 @@ import { Icec, MetadadosIcec } from '../database/entities';
 import { Regiao, Metodo, IErrorService, ITask, IServiceResult, IPeriod } from '../shared/interfaces';
 import {
     generateServicePeriods,
+    generateServicePeriodsWithIncremental,
+    generateServicePeriodsWithGapDetection,
     extractServicePeriodRange,
     calculateExecutionTime,
     calculateTaskStats,
@@ -711,6 +713,75 @@ export class IcecService {
     // ========================================
 
     /**
+     * Obtém o último período (ANO e MÊS) registrado no banco de dados para ICEC
+     * Usado no modo incremental para determinar o ponto de início da coleta
+     * @returns Objeto com mes e ano do último registro, ou null se não houver registros
+     */
+    private async getLastIcecPeriod(): Promise<IPeriod | null> {
+        try {
+            // Buscar o último registro usando query builder para ter mais controle
+            const lastRecord = await icecRepository
+                .createQueryBuilder('icec')
+                .select(['icec.MES', 'icec.ANO'])
+                .orderBy('icec.ANO', 'DESC')
+                .addOrderBy('icec.MES', 'DESC')
+                .limit(1)
+                .getOne();
+
+            if (!lastRecord) {
+                console.log('ℹ️ Nenhum registro ICEC encontrado no banco de dados');
+                return null;
+            }
+
+            console.log(`📅 Último período ICEC no banco: ${lastRecord.MES.toString().padStart(2, '0')}/${lastRecord.ANO}`);
+            return {
+                mes: lastRecord.MES,
+                ano: lastRecord.ANO
+            };
+
+        } catch (error) {
+            console.error('❌ Erro ao buscar último período ICEC:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Obtém todos os períodos únicos (ANO e MÊS) existentes no banco de dados para ICEC
+     * Usado no modo incremental para detectar lacunas nos dados
+     * @returns Array de períodos existentes no banco ou array vazio se não houver registros
+     */
+    private async getAllExistingIcecPeriods(): Promise<IPeriod[]> {
+        try {
+            const existingRecords = await icecRepository
+                .createQueryBuilder('icec')
+                .select(['icec.MES', 'icec.ANO'])
+                .distinct(true)
+                .orderBy('icec.ANO', 'ASC')
+                .addOrderBy('icec.MES', 'ASC')
+                .getMany();
+
+            const periods: IPeriod[] = existingRecords.map(record => ({
+                mes: record.MES,
+                ano: record.ANO
+            }));
+
+            console.log(`📊 Total de períodos únicos no banco ICEC: ${periods.length}`);
+            if (periods.length > 0) {
+                const primeiro = periods[0];
+                const ultimo = periods[periods.length - 1];
+                console.log(`📅 Primeiro período: ${primeiro.mes.toString().padStart(2, '0')}/${primeiro.ano}`);
+                console.log(`📅 Último período: ${ultimo.mes.toString().padStart(2, '0')}/${ultimo.ano}`);
+            }
+
+            return periods;
+
+        } catch (error) {
+            console.error('❌ Erro ao buscar períodos existentes ICEC:', error);
+            return [];
+        }
+    }
+
+    /**
      * Salva um único registro ICEC no banco de dados
      * Utilizado para evitar problemas de performance em produção com grandes volumes
      * @param icecData Objeto Icec para ser salvo
@@ -773,11 +844,21 @@ export class IcecService {
     /**
      * Remove todos os dados ICEC e metadados do banco de dados
      * Respeita a ordem de exclusão para manter integridade referencial
+     * Apenas executa limpeza quando PROCESSING_METHOD for 'Truncate and Load'
      * @returns String com log das operações realizadas
      */
     private async cleanDatabase(): Promise<string> {
+        const processingMethod = process.env.PROCESSING_METHOD?.trim().replace(/'/g, '') || 'Incremental';
+        
+        if (processingMethod === 'Incremental') {
+            const message = '🔄 Modo incremental ativo - mantendo dados existentes no banco';
+            console.log(message);
+            return `${message}\n`;
+        }
+
         try {
             const logMessages: string[] = [];
+            console.log('🧹 Modo Truncate and Load - limpando base de dados ICEC...');
 
             // Limpar metadados primeiro (respeitando foreign key constraint)
             console.log('🧹 Limpando metadados ICEC...');
@@ -1130,7 +1211,40 @@ export class IcecService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = generateServicePeriods('ICEC');
+        // Gerar períodos automaticamente baseado no método de processamento (com detecção de lacunas)
+        const periods = await generateServicePeriodsWithGapDetection(
+            'ICEC', 
+            () => this.getLastIcecPeriod(),
+            () => this.getAllExistingIcecPeriods()
+        );
+
+        // Verificar se há períodos para processar
+        if (periods.length === 0) {
+            console.log(`🔒 Nenhum período novo para processar - dados já atualizados`);
+            
+            const endTime = Date.now();
+            const tempoExecucao = calculateExecutionTime(startTime, endTime);
+            
+            const resultado: IServiceResult = {
+                servico: 'ICEC',
+                periodoInicio: 'N/A',
+                periodoFim: 'N/A',
+                tempoExecucao,
+                tasks: [],
+                totalRegistros: 0,
+                registrosPlanilha: 0,
+                registrosWebScraping: 0,
+                sucessos: 0,
+                falhas: 0
+            };
+
+            console.log(`\n=== Processamento ICEC concluído ===`);
+            console.log(`Status: Nenhum período novo para processar`);
+            console.log(`Tempo: ${Math.round(tempoExecucao / 1000)} segundos`);
+
+            return resultado;
+        }
+
         const tasks: ITask[] = [];
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;

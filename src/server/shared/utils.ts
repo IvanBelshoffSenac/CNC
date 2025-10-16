@@ -2,6 +2,7 @@ import { format } from 'date-fns';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { icfXLSXCompleta, icfXLSXTipo, IPeriod, peicXLSXCompleta, peicXLSXTipo, icecXLSXCompleta, icecXLSXTipo } from './interfaces';
+import { icecRepository } from '../database/repositories';
 
 /**
  * Gera períodos de janeiro/2010 até o período atual
@@ -368,13 +369,172 @@ export function getServicePeriodConfig(service: 'ICF' | 'ICEC' | 'PEIC'): IPerio
 }
 
 /**
- * Gera períodos para um serviço específico baseado na configuração do .env
+ * Gera períodos para um serviço específico baseado na configuração do .env (versão síncrona - compatibilidade)
  * @param service Nome do serviço (ICF, ICEC, PEIC)
  * @returns Array de períodos para o serviço
  */
 export function generateServicePeriods(service: 'ICF' | 'ICEC' | 'PEIC'): IPeriod[] {
+    const processingMethod = process.env.PROCESSING_METHOD?.trim().replace(/'/g, '') || 'Incremental';
+    
+    // Para manter compatibilidade com ICF e PEIC, usar modo Truncate and Load como padrão
+    if (processingMethod !== 'Incremental') {
+        console.log('🧹 Modo Truncate and Load: processando período completo');
+    } else {
+        console.log('🔄 Modo incremental detectado, mas usando função de compatibilidade - processando período completo');
+    }
+
     const config = getServicePeriodConfig(service);
     return generatePeriodsFromConfig(config);
+}
+
+/**
+ * Gera períodos para um serviço específico com suporte completo ao modo incremental
+ * Automaticamente detecta o modo de processamento e busca último registro quando necessário
+ * @param service Nome do serviço (ICF, ICEC, PEIC)
+ * @param getLastPeriodFn Função para buscar último período (apenas para modo incremental)
+ * @returns Array de períodos para o serviço
+ */
+export async function generateServicePeriodsWithIncremental(
+    service: 'ICF' | 'ICEC' | 'PEIC', 
+    getLastPeriodFn?: () => Promise<IPeriod | null>
+): Promise<IPeriod[]> {
+    const processingMethod = process.env.PROCESSING_METHOD?.trim().replace(/'/g, '') || 'Incremental';
+    
+    console.log(`📋 Método de processamento configurado: ${processingMethod}`);
+
+    const config = getServicePeriodConfig(service);
+
+    // Modo Truncate and Load: processa período completo
+    if (processingMethod === 'Truncate and Load') {
+        console.log('🧹 Modo Truncate and Load: processando período completo');
+        return generatePeriodsFromConfig(config);
+    }
+
+    // Modo Incremental: busca último período e processa a partir dele
+    if (!getLastPeriodFn) {
+        console.log('🔄 Modo incremental: função de busca não fornecida, processando período completo');
+        return generatePeriodsFromConfig(config);
+    }
+
+    const lastPeriod = await getLastPeriodFn();
+    
+    if (!lastPeriod) {
+        console.log('🔄 Modo incremental: nenhum registro encontrado, processando período completo');
+        return generatePeriodsFromConfig(config);
+    }
+
+    // Calcular próximo período após o último registro
+    let nextMes = lastPeriod.mes + 1;
+    let nextAno = lastPeriod.ano;
+    
+    if (nextMes > 12) {
+        nextMes = 1;
+        nextAno += 1;
+    }
+    
+    const incrementalStartDate: IPeriod = {
+        mes: nextMes,
+        ano: nextAno
+    };
+
+    // Verificar se o próximo período está dentro do período final configurado
+    const endDate = config.endDate;
+    const isNextPeriodValid = (incrementalStartDate.ano < endDate.ano) || 
+                              (incrementalStartDate.ano === endDate.ano && incrementalStartDate.mes <= endDate.mes);
+
+    if (!isNextPeriodValid) {
+        const lastPeriodStr = `${lastPeriod.mes.toString().padStart(2, '0')}/${lastPeriod.ano}`;
+        const endDateStr = `${endDate.mes.toString().padStart(2, '0')}/${endDate.ano}`;
+        const nextPeriodStr = `${incrementalStartDate.mes.toString().padStart(2, '0')}/${incrementalStartDate.ano}`;
+        
+        console.log(`🔒 Modo incremental: dados já atualizados até o período máximo configurado`);
+        console.log(`   📅 Último registro no banco: ${lastPeriodStr}`);
+        console.log(`   📅 Período final configurado: ${endDateStr}`);
+        console.log(`   📅 Próximo período seria: ${nextPeriodStr} (além do período final)`);
+        console.log(`   ✅ Nenhum período novo para processar`);
+        
+        return []; // Retorna array vazio - nada para processar
+    }
+    
+    console.log(`🔄 Modo incremental: coletando a partir de ${incrementalStartDate.mes.toString().padStart(2, '0')}/${incrementalStartDate.ano}`);
+    
+    // Criar nova configuração com a data de início incremental
+    const incrementalConfig: IPeriodConfig = {
+        startDate: incrementalStartDate,
+        endDate: config.endDate
+    };
+    
+    return generatePeriodsFromConfig(incrementalConfig);
+}
+
+/**
+ * Gera períodos para modo incremental com detecção de lacunas
+ * Identifica períodos faltantes entre o início configurado e o período final
+ * @param service Nome do serviço (ICF, ICEC, PEIC)
+ * @param getLastPeriodFn Função para buscar último período
+ * @param getAllExistingPeriodsFn Função para buscar todos os períodos existentes
+ * @returns Array de períodos faltantes para processar
+ */
+export async function generateServicePeriodsWithGapDetection(
+    service: 'ICF' | 'ICEC' | 'PEIC',
+    getLastPeriodFn: () => Promise<IPeriod | null>,
+    getAllExistingPeriodsFn: () => Promise<IPeriod[]>
+): Promise<IPeriod[]> {
+    const processingMethod = process.env.PROCESSING_METHOD?.trim().replace(/'/g, '') || 'Incremental';
+    
+    console.log(`📋 Método de processamento configurado: ${processingMethod}`);
+
+    const config = getServicePeriodConfig(service);
+
+    // Modo Truncate and Load: processa período completo
+    if (processingMethod === 'Truncate and Load') {
+        console.log('🧹 Modo Truncate and Load: processando período completo');
+        return generatePeriodsFromConfig(config);
+    }
+
+    // Modo Incremental com detecção de lacunas
+    console.log('🔍 Modo incremental: detectando lacunas nos dados...');
+    
+    // Obter todos os períodos que deveriam existir (configuração completa)
+    const allExpectedPeriods = generatePeriodsFromConfig(config);
+    
+    // Obter períodos existentes no banco
+    const existingPeriods = await getAllExistingPeriodsFn();
+    
+    // Converter períodos existentes em Set para busca eficiente
+    const existingPeriodsSet = new Set(
+        existingPeriods.map(p => `${p.ano}-${p.mes.toString().padStart(2, '0')}`)
+    );
+    
+    // Encontrar lacunas (períodos esperados que não existem no banco)
+    const missingPeriods = allExpectedPeriods.filter(expected => {
+        const key = `${expected.ano}-${expected.mes.toString().padStart(2, '0')}`;
+        return !existingPeriodsSet.has(key);
+    });
+
+    console.log(`📊 Análise de lacunas concluída:`);
+    console.log(`   📅 Períodos esperados: ${allExpectedPeriods.length}`);
+    console.log(`   📅 Períodos existentes: ${existingPeriods.length}`);
+    console.log(`   📅 Lacunas encontradas: ${missingPeriods.length}`);
+
+    if (missingPeriods.length > 0) {
+        console.log(`🔄 Processando lacunas encontradas:`);
+        const firstMissing = missingPeriods[0];
+        const lastMissing = missingPeriods[missingPeriods.length - 1];
+        console.log(`   📅 Primeira lacuna: ${firstMissing.mes.toString().padStart(2, '0')}/${firstMissing.ano}`);
+        console.log(`   📅 Última lacuna: ${lastMissing.mes.toString().padStart(2, '0')}/${lastMissing.ano}`);
+        
+        // Mostrar algumas lacunas como exemplo
+        const sampleGaps = missingPeriods.slice(0, 5);
+        console.log(`   📋 Exemplos de lacunas: ${sampleGaps.map(p => `${p.mes.toString().padStart(2, '0')}/${p.ano}`).join(', ')}`);
+        if (missingPeriods.length > 5) {
+            console.log(`   ... e mais ${missingPeriods.length - 5} lacunas`);
+        }
+    } else {
+        console.log(`✅ Nenhuma lacuna encontrada - dados estão completos!`);
+    }
+
+    return missingPeriods;
 }
 
 /**

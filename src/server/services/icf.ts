@@ -8,6 +8,7 @@ import { Icf, MetadadosIcf } from '../database/entities';
 import { Regiao, Metodo, IErrorService, ITask, IServiceResult, IPeriod, idsIcf } from '../shared/interfaces';
 import {
     generateServicePeriods,
+    generateServicePeriodsWithGapDetection,
     extractServicePeriodRange,
     calculateExecutionTime,
     calculateTaskStats,
@@ -429,8 +430,6 @@ export class IcfService {
             // Usar a função otimizada para extrair dados estruturados
             const icfCompleta = transformJsonToICF(jsonData);
 
-            console.log(icfCompleta);
-
             // Converter para o formato MetadadosIcf
             const metadados: MetadadosIcf[] = [];
 
@@ -740,6 +739,60 @@ export class IcfService {
     // ========================================
 
     /**
+     * Busca o último período processado no banco de dados ICF
+     * Usado para determinar ponto de partida no modo incremental
+     * @returns IPeriod com o último mês/ano processado ou null se não houver dados
+     */
+    private async getLastIcfPeriod(): Promise<IPeriod | null> {
+        try {
+            const lastRecord = await icfRepository
+                .createQueryBuilder('icf')
+                .select(['icf.MES', 'icf.ANO'])
+                .orderBy('icf.ANO', 'DESC')
+                .addOrderBy('icf.MES', 'DESC')
+                .limit(1)
+                .getOne();
+
+            if (!lastRecord) {
+                return null;
+            }
+
+            return {
+                mes: lastRecord.MES,
+                ano: lastRecord.ANO
+            };
+        } catch (error) {
+            console.log(`❌ Erro ao buscar último período ICF: ${error}`);
+            return null;
+        }
+    }
+
+    /**
+     * Busca todos os períodos existentes no banco de dados ICF
+     * Usado para detecção de lacunas no modo incremental
+     * @returns Array de IPeriod com todos os períodos únicos existentes
+     */
+    private async getAllExistingIcfPeriods(): Promise<IPeriod[]> {
+        try {
+            const existingPeriods = await icfRepository
+                .createQueryBuilder('icf')
+                .select(['icf.MES', 'icf.ANO'])
+                .distinct(true)
+                .orderBy('icf.ANO', 'ASC')
+                .addOrderBy('icf.MES', 'ASC')
+                .getMany();
+
+            return existingPeriods.map(record => ({
+                mes: record.MES,
+                ano: record.ANO
+            }));
+        } catch (error) {
+            console.log(`❌ Erro ao buscar períodos existentes ICF: ${error}`);
+            return [];
+        }
+    }
+
+    /**
      * Salva um único registro ICF no banco de dados
      * Utilizado para evitar problemas de performance em produção com grandes volumes
      * @param icfData Objeto Icf para ser salvo
@@ -843,11 +896,24 @@ export class IcfService {
     /**
      * Remove todos os dados ICF e metadados do banco de dados
      * Respeita a ordem de exclusão para manter integridade referencial
+     * Considera o método de processamento configurado (Incremental vs Truncate and Load)
      * @returns String com log das operações realizadas
      */
     private async cleanDatabase(): Promise<string> {
         try {
             const logMessages: string[] = [];
+            const processingMethod = process.env.PROCESSING_METHOD || 'Truncate and Load';
+
+            console.log(`📋 Método de processamento configurado: ${processingMethod}`);
+
+            if (processingMethod === 'Incremental') {
+                console.log('🔄 Modo incremental ativo - mantendo dados existentes no banco');
+                logMessages.push('🔄 Modo incremental ativo - mantendo dados existentes no banco');
+                return logMessages.join('\n') + '\n';
+            }
+
+            // Modo Truncate and Load - limpar tudo
+            console.log('🗑️ Modo Truncate and Load ativo - limpando todos os dados do banco');
 
             // Limpar metadados primeiro (respeitando foreign key constraint)
             console.log('🧹 Limpando metadados ICF...');
@@ -1230,6 +1296,7 @@ export class IcfService {
     /**
      * Método principal que executa o processamento completo dos dados ICF
      * Inclui download, extração, salvamento, retry via web scraping e processamento de metadados
+     * Suporte para modo incremental com detecção de lacunas
      * @param regioes Array de regiões para processamento (padrão: ['BR'])
      * @returns Objeto IServiceResult com estatísticas completas da execução
      */
@@ -1242,7 +1309,28 @@ export class IcfService {
 
         console.log(`📍 Regiões a processar: ${regioes.join(', ')}\n`);
 
-        const periods = generateServicePeriods('ICF');
+        // Determinar períodos baseado no método de processamento
+        const processingMethod = process.env.PROCESSING_METHOD || 'Truncate and Load';
+        let periods: IPeriod[];
+
+        if (processingMethod === 'Incremental') {
+            console.log('🔍 Modo incremental: detectando lacunas nos dados...');
+            const existingPeriods = await this.getAllExistingIcfPeriods();
+            console.log(`📊 Total de períodos únicos no banco ICF: ${existingPeriods.length}`);
+            
+            if (existingPeriods.length > 0) {
+                console.log(`📅 Primeiro período: ${existingPeriods[0].mes.toString().padStart(2, '0')}/${existingPeriods[0].ano}`);
+                console.log(`📅 Último período: ${existingPeriods[existingPeriods.length - 1].mes.toString().padStart(2, '0')}/${existingPeriods[existingPeriods.length - 1].ano}`);
+            }
+            
+            periods = await generateServicePeriodsWithGapDetection(
+                'ICF', 
+                this.getLastIcfPeriod.bind(this), 
+                this.getAllExistingIcfPeriods.bind(this)
+            );
+        } else {
+            periods = generateServicePeriods('ICF');
+        }
         const tasks: ITask[] = [];
         let registrosPlanilha = 0;
         let registrosWebScraping = 0;

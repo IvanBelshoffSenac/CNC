@@ -19,7 +19,7 @@ export class NotificationService {
     /**
      * Calcula a próxima execução baseada no schedule CRON do serviço
      */
-    private calcularProximaExecucao(nomeServico: string): { proximaData: Date; diasAteProxima: number; dataFormatada: string } {
+    private calcularProximaExecucao(nomeServico: string): { proximaData: Date; diasAteProxima: number; dataFormatada: string; horaFormatada: string; dataHoraCompleta: string } {
         const agora = new Date();
         
         // Obter schedule do ambiente ou usar padrão
@@ -36,7 +36,9 @@ export class NotificationService {
             return {
                 proximaData,
                 diasAteProxima: 30,
-                dataFormatada: format(proximaData, "dd/MM/yyyy", { locale: ptBR })
+                dataFormatada: format(proximaData, "dd/MM/yyyy", { locale: ptBR }),
+                horaFormatada: format(proximaData, "HH:mm", { locale: ptBR }),
+                dataHoraCompleta: format(proximaData, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })
             };
         }
 
@@ -77,11 +79,15 @@ export class NotificationService {
 
         const diasAteProxima = differenceInDays(startOfDay(proximaData), startOfDay(agora));
         const dataFormatada = format(proximaData, "dd/MM/yyyy", { locale: ptBR });
+        const horaFormatada = format(proximaData, "HH:mm", { locale: ptBR });
+        const dataHoraCompleta = format(proximaData, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
 
         return {
             proximaData,
             diasAteProxima,
-            dataFormatada
+            dataFormatada,
+            horaFormatada,
+            dataHoraCompleta
         };
     }
 
@@ -292,7 +298,7 @@ export class NotificationService {
             const regioesApuradas = [...new Set(resultado.tasks.map(task => task.regiao))].sort();
 
             // Calcular próxima execução
-            const { dataFormatada, diasAteProxima } = this.calcularProximaExecucao(resultado.servico);
+            const { dataHoraCompleta, diasAteProxima } = this.calcularProximaExecucao(resultado.servico);
             const textoProximaExecucao = diasAteProxima === 0 
                 ? 'hoje' 
                 : diasAteProxima === 1 
@@ -325,7 +331,7 @@ export class NotificationService {
                 <div class="stats ${statusClass}">🎯 <strong>Taxa de Sucesso:</strong> ${taxaSucesso}%</div>
                 <br>
                 
-                <div class="stats">📅 <strong>Próxima Execução Agendada:</strong> ${dataFormatada} (${textoProximaExecucao})</div>
+                <div class="stats">📅 <strong>Próxima Execução Agendada:</strong> ${dataHoraCompleta} (${textoProximaExecucao})</div>
             </div>
             `;
         }
