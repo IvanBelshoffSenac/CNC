@@ -19,7 +19,6 @@ export class TaskOrchestrator {
         console.log('📅 Agendamentos serão configurados dinamicamente via variáveis de ambiente');
         console.log('   • Configure SCHEDULE_ICEC, SCHEDULE_ICF, SCHEDULE_PEIC no .env');
         console.log('   • Configure ENABLED_ICEC, ENABLED_ICF, ENABLED_PEIC para habilitar/desabilitar serviços');
-        console.log('   • Padrão: ICEC às 02:00, ICF às 05:00, PEIC às 08:00 (todo dia 1)');
         console.log('   • Relatório: Enviado automaticamente após cada execução\n');
     }
 
